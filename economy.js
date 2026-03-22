@@ -1,20 +1,5 @@
-const fs = require("fs");
+const { loadDB, saveDB } = require("./db");
 const { EmbedBuilder } = require("discord.js");
-
-const DB = "./data.json";
-const R = "<:Robux_logo:1485012977638838272>"; // money icon
-
-// ─── DB Helpers ───────────────────────────────────────────────────────────────
-
-function loadDB() {
-  if (!fs.existsSync(DB)) fs.writeFileSync(DB, "{}");
-  try { return JSON.parse(fs.readFileSync(DB, "utf8")); }
-  catch { return {}; }
-}
-
-function saveDB(data) {
-  fs.writeFileSync(DB, JSON.stringify(data, null, 2));
-}
 
 const DEFAULT_USER = () => ({
   balance: 0,
