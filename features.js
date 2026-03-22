@@ -272,7 +272,7 @@ async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore) {
       if (referrer) referrer.send({ embeds: [baseEmbed("🤝 New Referral!", 0x2ECC71)
         .setDescription(`**${member.user.username}** joined via your affiliate link!\n\nYou'll earn **${AFF_PCT_DISPLAY}** of their wagers.`)] }).catch(() => {});
       member.user.send({ embeds: [baseEmbed("👋 Welcome!", 0x5865F2)
-        .setDescription("You joined via an affiliate link! Use `$daily` to get started.")] }).catch(() => {});
+        .setDescription("You joined via an affiliate link! Use `/wheel` for a free spin to get started.")] }).catch(() => {});
       break;
     }
   } catch (err) { console.error("Affiliate join error:", err); }
@@ -1016,7 +1016,7 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
     embeds: [baseEmbed("✅ Verified!", 0x2ECC71)
       .setDescription(
         `You have been successfully verified and granted access to the server!${inviteSourceMsg}\n\n` +
-        `Use \`/daily\` to claim your first coins and start playing! 🎰` +
+        `Use \`/wheel\` for a free spin or ask an admin to deposit coins to get started! 🎰` +
         (inviteForUser ? `\n\n🔗 **Your personal invite link:**\n${inviteForUser}\nShare it to earn rewards!` : "")
       )]
   });
