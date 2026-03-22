@@ -1,5 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const { getBalance, addBalance, removeBalance, recordGame, baseEmbed, COLORS, R, WHEEL_BONUS_KEYS } = require("./economy");
+const { loadDB, saveDB } = require("./db");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,26 +21,18 @@ function feeDisplay(gross, net) {
 
 // ─── Active Bonus Helpers ─────────────────────────────────────────────────────
 
-const fs_bonus = require("fs");
-const DB_PATH  = "./data.json";
-
-function loadBonusDB() {
-  try { return JSON.parse(fs_bonus.readFileSync(DB_PATH, "utf8")); } catch { return {}; }
-}
-function saveBonusDB(d) { fs_bonus.writeFileSync(DB_PATH, JSON.stringify(d, null, 2)); }
-
 // Returns the active bonus key for a user, or null
 function getActiveBonus(guildId, userId) {
-  const db = loadBonusDB();
+  const db = loadDB();
   return db[guildId]?.[userId]?.activeBonus || null;
 }
 
 // Clears the active bonus after it has been applied
 function clearActiveBonus(guildId, userId) {
-  const db = loadBonusDB();
+  const db = loadDB();
   if (db[guildId]?.[userId]) {
     delete db[guildId][userId].activeBonus;
-    saveBonusDB(db);
+    saveDB(db);
   }
 }
 
@@ -86,9 +79,8 @@ async function checkWagerRole(interaction, guildId, userId, recordResult) {
   try {
     if (!recordResult?.crossedNewMilestone) return;
     const { WAGER_MILESTONES } = require("./economy");
-    const fs  = require("fs");
-    const db  = JSON.parse(fs.readFileSync("./data.json", "utf8"));
-    const roles = db.wagerRoles || {}; // { "1000": "roleId", "5000": "roleId", ... }
+    const db    = loadDB();
+    const roles = db.wagerRoles || {};
     if (!Object.keys(roles).length) return;
 
     const guild  = interaction.guild;
