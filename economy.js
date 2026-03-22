@@ -1,6 +1,8 @@
 const { loadDB, saveDB } = require("./db");
 const { EmbedBuilder } = require("discord.js");
 
+const R = "<:Robux_logo:1485012977638838272>";
+
 const DEFAULT_USER = () => ({
   balance: 0,
   lastDaily: 0,
