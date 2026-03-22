@@ -1,18 +1,9 @@
-const fs = require("fs");
+const { loadDB, saveDB } = require("./db");
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 
-const DB       = "./data.json";
 const OWNER_ID = "926063716057894953";
 const R        = "<:Robux_logo:1485012977638838272>";
 
-// ─── DB Helpers ───────────────────────────────────────────────────────────────
-
-function loadDB() {
-  if (!fs.existsSync(DB)) fs.writeFileSync(DB, "{}");
-  try { return JSON.parse(fs.readFileSync(DB, "utf8")); }
-  catch { return {}; }
-}
-function saveDB(d) { fs.writeFileSync(DB, JSON.stringify(d, null, 2)); }
 function getGlobal(key)        { const db = loadDB(); return db[key] ?? null; }
 function setGlobal(key, value) { const db = loadDB(); db[key] = value; saveDB(db); }
 
