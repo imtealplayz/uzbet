@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Collection } = require("discord.js");
+const { connectDB, loadDB } = require("./db");
 const {
   cmdBalance, cmdLeaderboard, cmdProfile,
   cmdTip, cmdRain, cmdGive, cmdTake,
@@ -333,9 +334,7 @@ client.on("guildMemberAdd", async (member) => {
     if (invitesAfter) inviteCache.set(guildId, invitesAfter);
 
     // Wheel spin invite tracking
-    const fs2 = require("fs");
-    let data  = {};
-    try { data = JSON.parse(fs2.readFileSync("./data.json", "utf8")); } catch {}
+    const data     = loadDB();
     const guildData = data[guildId] || {};
     for (const [uid, udata] of Object.entries(guildData)) {
       const userInvite = udata.wheelInviteUrl;
@@ -372,4 +371,7 @@ client.on("guildMemberRemove", async (member) => {
   }
 });
 
-client.login(TOKEN);
+// Connect to MongoDB first, then start the bot
+connectDB().then(() => {
+  client.login(TOKEN);
+});
