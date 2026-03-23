@@ -61,14 +61,17 @@ const commands = [
     .addIntegerOption(o => o.setName("duration").setDescription("Duration in seconds (10–300)").setRequired(true)),
 
   new SlashCommandBuilder().setName("deposit").setDescription("Admin: Credit a user's manual Robux deposit")
+    .setDefaultMemberPermissions(0)
     .addUserOption(o => o.setName("user").setDescription("User to credit").setRequired(true))
     .addIntegerOption(o => o.setName("amount").setDescription("Amount they deposited").setRequired(true)),
 
   new SlashCommandBuilder().setName("give").setDescription("Admin: Give coins to a user")
+    .setDefaultMemberPermissions(0)
     .addUserOption(o => o.setName("user").setDescription("Target user").setRequired(true))
     .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
 
   new SlashCommandBuilder().setName("take").setDescription("Admin: Take coins from a user")
+    .setDefaultMemberPermissions(0)
     .addUserOption(o => o.setName("user").setDescription("Target user").setRequired(true))
     .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
 
@@ -116,6 +119,7 @@ const commands = [
   new SlashCommandBuilder().setName("wheel").setDescription("Spin the wheel of fortune! (Once every 24h, or use an invite spin)"),
 
   new SlashCommandBuilder().setName("givespins").setDescription("Owner: Give wheel spins to a user")
+    .setDefaultMemberPermissions(0)
     .addUserOption(o => o.setName("user").setDescription("User to give spins to").setRequired(true))
     .addIntegerOption(o => o.setName("amount").setDescription("Number of spins to give").setRequired(true)),
 
@@ -142,6 +146,7 @@ const commands = [
   // ─── Admin-only slash commands ───────────────────────────────────────────────
   new SlashCommandBuilder().setName("admin")
     .setDescription("Admin commands")
+    .setDefaultMemberPermissions(0)
     .addSubcommand(s => s.setName("help").setDescription("View all admin commands"))
     .addSubcommand(s => s.setName("setrole").setDescription("Set the verified role for affiliate")
       .addRoleOption(o => o.setName("role").setDescription("The role to count as verified").setRequired(true)))
