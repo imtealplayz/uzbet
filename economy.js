@@ -1,5 +1,5 @@
 const { loadDB, saveDB } = require("./db");
-const { EmbedBuilder } = require("discord.js");
+const { EmbedBuilder, MessageFlags } = require("discord.js");
 
 const R = "<:Robux_logo:1485012977638838272>";
 
@@ -264,20 +264,20 @@ async function cmdTip(interaction, userId, guildId, targetUser, amount) {
   amount = parseInt(amount);
 
   if (!targetUser) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `/tip @user amount`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `/tip @user amount`")], flags: MessageFlags.Ephemeral });
   }
   if (!amount || isNaN(amount) || amount < 1) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Amount", COLORS.red).setDescription("Please provide a valid tip amount.")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Amount", COLORS.red).setDescription("Please provide a valid tip amount.")], flags: MessageFlags.Ephemeral });
   }
   if (targetUser.id === userId) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Nice Try", COLORS.red).setDescription("You can't tip yourself!")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Nice Try", COLORS.red).setDescription("You can't tip yourself!")], flags: MessageFlags.Ephemeral });
   }
 
   const senderData = getUser(guildId, userId);
   const bal = senderData.balance || 0;
 
   if (bal < amount) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You only have **${bal.toLocaleString()} ${R}**.`)], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You only have **${bal.toLocaleString()} ${R}**.`)], flags: MessageFlags.Ephemeral });
   }
 
   // Wager requirement: must wager 50% of all coins received (daily claimed + tips received)
@@ -297,7 +297,7 @@ async function cmdTip(interaction, userId, guildId, targetUser, amount) {
           `✅ You've wagered: **${totalWagered.toLocaleString()} ${R}**\n` +
           `⏳ Still need: **${remaining.toLocaleString()} ${R}** more wager`
         )],
-      flags: 64
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -355,18 +355,18 @@ async function cmdRain(interaction, userId, guildId, amount, duration) {
   duration = parseInt(duration);
 
   if (!amount || isNaN(amount) || amount < 1) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Amount", COLORS.red).setDescription(`Minimum rain amount is **1 ${R}**.\n\nUsage: \`$rain <amount> <seconds>\`\nExample: \`$rain 50 60\``)], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Amount", COLORS.red).setDescription(`Minimum rain amount is **1 ${R}**.\n\nUsage: \`$rain <amount> <seconds>\`\nExample: \`$rain 50 60\``)], flags: MessageFlags.Ephemeral });
   }
   if (!duration || isNaN(duration) || duration < 10 || duration > 300) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Duration", COLORS.red).setDescription("Duration must be between **10s** and **300s**.\n\nUsage: `$rain <amount> <seconds>`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Duration", COLORS.red).setDescription("Duration must be between **10s** and **300s**.\n\nUsage: `$rain <amount> <seconds>`")], flags: MessageFlags.Ephemeral });
   }
 
   const bal = getBalance(guildId, userId);
   if (bal < amount) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You need **${amount.toLocaleString()} ${R}** but only have **${bal.toLocaleString()} ${R}**.`)], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You need **${amount.toLocaleString()} ${R}** but only have **${bal.toLocaleString()} ${R}**.`)], flags: MessageFlags.Ephemeral });
   }
   if (activeRains.has(guildId)) {
-    return interaction.reply({ embeds: [baseEmbed("⛈️ Rain Active", COLORS.red).setDescription("There's already an active rain! Wait for it to end.")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("⛈️ Rain Active", COLORS.red).setDescription("There's already an active rain! Wait for it to end.")], flags: MessageFlags.Ephemeral });
   }
 
   removeBalance(guildId, userId, amount);
@@ -386,7 +386,7 @@ async function cmdRain(interaction, userId, guildId, amount, duration) {
   if (typeof interaction.fetchReply === "function") {
     // slash command — get channel from interaction
     channel = interaction.channel;
-    await interaction.reply({ content: "🎉 Rain started!", flags: 64 }); // ephemeral ack
+    await interaction.reply({ content: "🎉 Rain started!", flags: MessageFlags.Ephemeral }); // ephemeral ack
   } else {
     channel = interaction.channel;
   }
@@ -432,11 +432,11 @@ const OWNER_ID = "926063716057894953";
 
 async function cmdGive(interaction, guildId, targetUser, amount) {
   if (interaction.user?.id !== OWNER_ID && interaction.author?.id !== OWNER_ID) {
-    return interaction.reply({ embeds: [baseEmbed("❌ No Permission", COLORS.red).setDescription("You don't have permission to use this command.")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ No Permission", COLORS.red).setDescription("You don't have permission to use this command.")], flags: MessageFlags.Ephemeral });
   }
   amount = parseInt(amount);
   if (!targetUser || isNaN(amount) || amount < 1) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `$give @user <amount>`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `$give @user <amount>`")], flags: MessageFlags.Ephemeral });
   }
   addBalance(guildId, targetUser.id, amount);
   await interaction.reply({
@@ -450,11 +450,11 @@ async function cmdGive(interaction, guildId, targetUser, amount) {
 
 async function cmdTake(interaction, guildId, targetUser, amount) {
   if (interaction.user?.id !== OWNER_ID && interaction.author?.id !== OWNER_ID) {
-    return interaction.reply({ embeds: [baseEmbed("❌ No Permission", COLORS.red).setDescription("You don't have permission to use this command.")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ No Permission", COLORS.red).setDescription("You don't have permission to use this command.")], flags: MessageFlags.Ephemeral });
   }
   amount = parseInt(amount);
   if (!targetUser || isNaN(amount) || amount < 1) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `$take @user <amount>`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid", COLORS.red).setDescription("Usage: `$take @user <amount>`")], flags: MessageFlags.Ephemeral });
   }
   removeBalance(guildId, targetUser.id, amount);
   await interaction.reply({
@@ -521,18 +521,18 @@ async function cmdRakeback(interaction, userId, guildId) {
 
 async function handleRakebackClaim(interaction, userId, guildId) {
   const db = loadDB();
-  if (!db[guildId]?.[userId]) return interaction.reply({ content: "No data found.", ephemeral: true });
+  if (!db[guildId]?.[userId]) return interaction.reply({ content: "No data found.", flags: MessageFlags.Ephemeral });
   const u = db[guildId][userId];
 
   const now = Date.now();
   const cooldown = 24 * 60 * 60 * 1000;
   if (now - (u.lastRakebackClaim || 0) < cooldown) {
-    return interaction.reply({ content: "You already claimed your rakeback in the last 24h!", ephemeral: true });
+    return interaction.reply({ content: "You already claimed your rakeback in the last 24h!", flags: MessageFlags.Ephemeral });
   }
 
   const claimable = Math.floor(u.rakebackPending || 0);
   if (claimable === 0) {
-    return interaction.reply({ content: "Nothing to claim yet!", ephemeral: true });
+    return interaction.reply({ content: "Nothing to claim yet!", flags: MessageFlags.Ephemeral });
   }
 
   u.rakebackPending = (u.rakebackPending || 0) - claimable;
