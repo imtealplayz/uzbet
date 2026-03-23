@@ -1097,7 +1097,7 @@ async function cmdAdminHelp(interaction) {
     embeds: [new EmbedBuilder().setColor(0xE74C3C).setTitle("🛡️ Admin Commands")
       .setDescription("Only visible to the server owner.")
       .addFields(
-        { name: "💰 Economy",      value: "`/admin give`  `/admin take`\n`/deposit @user amount` — credit a manual deposit (applies active deposit bonus)" },
+        { name: "💰 Economy",      value: "`/admin give`  `/admin take`\n`/deposit @user amount` — credit a manual deposit (applies active deposit bonus)\n`/givespins @user amount` — manually give wheel spins" },
         { name: "🎟️ Promo",        value: "`/admin createpromo code amount uses expires`" },
         { name: "🤝 Affiliate",    value: "`/admin affiliatepanel`  `/admin setrole role`" },
         { name: "🏆 Prize Pool",   value: "`/admin prizepoolcreate amount`\n`/admin prizepoolpanel`\n`/admin prizepoolreset`" },
