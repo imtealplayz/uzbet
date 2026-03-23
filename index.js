@@ -380,9 +380,24 @@ client.on("guildMemberAdd", async (member) => {
     }
 
     // Affiliate, prize pool, guess code join handlers
-    await handleAffiliateMemberJoin(member, client, cachedBefore);
-    await handlePrizepoolMemberJoin(member, client, cachedBefore);
-    await handleCodeMemberJoin(member, client, cachedBefore);
+    const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore);
+    const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore);
+    const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore);
+
+    // If invite didn't qualify for anything, DM the new member to let them know
+    if (!wheelSpinGranted && !affMatched && !ppMatched && !codeMatched) {
+      member.user.send({ embeds: [new (require("discord.js").EmbedBuilder)()
+        .setColor(0x5865F2)
+        .setTitle("👋 Welcome!")
+        .setDescription(
+          `Welcome to the server!\n\n` +
+          `Your invite link didn't qualify for any active reward programs (affiliate, prize pool, or guess the code).\n\n` +
+          `Use \`/wheel\` for a free daily spin to get started! 🎡`
+        )
+        .setTimestamp()
+        .setFooter({ text: "🎰 Casino Bot" })]
+      }).catch(() => {}); // DMs may be closed — silent fail
+    }
 
   } catch (err) {
     console.error("guildMemberAdd error:", err);
