@@ -657,22 +657,29 @@ async function cmdWheel(interaction, userId, guildId) {
   db[guildId][userId] = u;
   saveDB(db);
 
-  // Generate invite link
+  // Generate invite link — only create one if user doesn't already have one
+  // Never overwrite: if we replace the URL, joins on the old link are lost
   let inviteUrl = null;
-  try {
-    const channel = interaction.channel || interaction.message?.channel;
-    if (channel) {
-      const invite = await channel.createInvite({ maxAge: 0, maxUses: 0, unique: false, reason: "Wheel spin invite" });
-      inviteUrl = invite.url;
-    }
-  } catch { /* invite creation failed */ }
+  const existingUrl = db[guildId]?.[userId]?.wheelInviteUrl || null;
 
-  if (inviteUrl) {
-    const db2 = loadDB();
-    if (db2[guildId]?.[userId]) {
-      db2[guildId][userId].wheelInviteUrl = inviteUrl;
-      saveDB(db2);
-    }
+  if (existingUrl) {
+    // Reuse existing invite URL — no need to create a new one
+    inviteUrl = existingUrl;
+  } else {
+    try {
+      const channel = interaction.channel || interaction.message?.channel;
+      if (channel) {
+        // unique:true so each user gets their own trackable code
+        const invite = await channel.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `WheelInvite:${userId}` });
+        inviteUrl = invite.url;
+        const db2 = loadDB();
+        if (db2[guildId]?.[userId]) {
+          db2[guildId][userId].wheelInviteUrl  = inviteUrl;
+          db2[guildId][userId].wheelInviteCode = invite.code;
+          saveDB(db2);
+        }
+      }
+    } catch { /* invite creation failed */ }
   }
 
   // ── Animation: scroll through items stopping on result ──
@@ -763,13 +770,45 @@ async function cmdWheel(interaction, userId, guildId) {
 }
 
 // Called when someone joins via an invite — grant a spin
-async function grantWheelSpin(guildId, inviterUserId) {
+async function grantWheelSpin(guildId, inviterUserId, amount = 1) {
   const db = loadDB();
-  if (!db[guildId]?.[inviterUserId]) return;
+  if (!db[guildId]) db[guildId] = {};
+  if (!db[guildId][inviterUserId]) db[guildId][inviterUserId] = DEFAULT_USER();
   const u = db[guildId][inviterUserId];
-  u.wheelExtraSpins = (u.wheelExtraSpins || 0) + 1;
+  u.wheelExtraSpins = (u.wheelExtraSpins || 0) + amount;
   db[guildId][inviterUserId] = u;
   saveDB(db);
+}
+
+// ─── Give Wheel Spins (owner only) ───────────────────────────────────────────
+
+async function cmdGiveSpins(interaction, guildId, targetUser, amount) {
+  if ((interaction.user?.id || interaction.author?.id) !== OWNER_ID) {
+    return interaction.reply({ content: "❌ No permission.", flags: 64 });
+  }
+  if (!targetUser || !amount || amount < 1) {
+    return interaction.reply({ content: "❌ Usage: `/givespins @user amount`", flags: 64 });
+  }
+
+  await grantWheelSpin(guildId, targetUser.id, amount);
+
+  // DM the user
+  try {
+    const discordUser = await interaction.client.users.fetch(targetUser.id);
+    await discordUser.send({ embeds: [baseEmbed("🎡 Bonus Spins!", COLORS.purple)
+      .setDescription(`You've been granted **+${amount} wheel spin${amount > 1 ? "s" : ""}** by an admin!\n\nUse \`/wheel\` to spin!`)]
+    }).catch(() => {});
+  } catch { /* DMs closed */ }
+
+  await interaction.reply({
+    embeds: [baseEmbed("✅ Spins Granted", COLORS.green)
+      .addFields(
+        { name: "User",   value: `<@${targetUser.id}>`, inline: true },
+        { name: "Spins",  value: `+${amount}`,           inline: true },
+        { name: "Total",  value: `${(loadDB()[guildId]?.[targetUser.id]?.wheelExtraSpins || 0)} spins`, inline: true }
+      )],
+    flags: 64
+  });
 }
 
 module.exports = {
@@ -781,6 +820,6 @@ module.exports = {
   cmdBalance, cmdLeaderboard, cmdProfile,
   cmdTip, cmdRain, cmdGive, cmdTake,
   cmdRakeback, handleRakebackClaim,
-  cmdWheel, grantWheelSpin,
+  cmdWheel, grantWheelSpin, cmdGiveSpins,
   COLORS, baseEmbed,
 };
