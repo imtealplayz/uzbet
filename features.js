@@ -1,5 +1,5 @@
 const { loadDB, saveDB } = require("./db");
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 
 const OWNER_ID = "926063716057894953";
 const R        = "<:Robux_logo:1485012977638838272>";
@@ -57,7 +57,7 @@ function checkDailyWagerReq(guildId, userId) {
 // ─── PROMO CODES ──────────────────────────────────────────────────────────────
 
 async function cmdCreatePromo(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   const code    = interaction.options.getString("code").toUpperCase().trim();
   const amount  = interaction.options.getInteger("amount");
@@ -67,14 +67,14 @@ async function cmdCreatePromo(interaction) {
   let expiresAt = null;
   if (expStr) {
     const m = expStr.match(/^(\d+)(h|d|m)$/);
-    if (!m) return interaction.reply({ content: "❌ Invalid expires. Use `24h`, `7d`, `30m`.", ephemeral: true });
+    if (!m) return interaction.reply({ content: "❌ Invalid expires. Use `24h`, `7d`, `30m`.", flags: MessageFlags.Ephemeral });
     const mult = { m: 60000, h: 3600000, d: 86400000 };
     expiresAt = Date.now() + parseInt(m[1]) * mult[m[2]];
   }
 
   const db = loadDB();
   if (!db.promoCodes) db.promoCodes = {};
-  if (db.promoCodes[code]) return interaction.reply({ content: `❌ Code \`${code}\` already exists.`, ephemeral: true });
+  if (db.promoCodes[code]) return interaction.reply({ content: `❌ Code \`${code}\` already exists.`, flags: MessageFlags.Ephemeral });
 
   db.promoCodes[code] = { amount, maxUses, uses: 0, usedBy: [], expiresAt, createdAt: Date.now() };
   saveDB(db);
@@ -86,21 +86,21 @@ async function cmdCreatePromo(interaction) {
       { name: "Max Uses", value: maxUses === 0 ? "Unlimited" : `${maxUses}`,            inline: true },
       { name: "Expires",  value: expiresAt ? `<t:${Math.floor(expiresAt/1000)}:R>` : "Never", inline: true }
     )],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
 async function cmdRedeemPromo(interaction, userId, guildId) {
   const code  = interaction.options?.getString("code")?.toUpperCase().trim();
-  if (!code)  return interaction.reply({ content: "❌ Provide a code. Example: `/promo code:SUMMER`", ephemeral: true });
+  if (!code)  return interaction.reply({ content: "❌ Provide a code. Example: `/promo code:SUMMER`", flags: MessageFlags.Ephemeral });
 
   const db    = loadDB();
   const promo = db.promoCodes?.[code];
 
-  if (!promo)                                           return interaction.reply({ embeds: [baseEmbed("❌ Invalid Code",  0xE74C3C).setDescription(`Code \`${code}\` does not exist.`)],              ephemeral: true });
-  if (promo.expiresAt && Date.now() > promo.expiresAt)  return interaction.reply({ embeds: [baseEmbed("❌ Expired",       0xE74C3C).setDescription("This promo code has expired.")],                   ephemeral: true });
-  if (promo.maxUses > 0 && promo.uses >= promo.maxUses) return interaction.reply({ embeds: [baseEmbed("❌ Used Up",       0xE74C3C).setDescription("This code has no uses remaining.")],              ephemeral: true });
-  if (promo.usedBy.includes(userId))                    return interaction.reply({ embeds: [baseEmbed("❌ Already Used",  0xE74C3C).setDescription("You've already redeemed this code.")],            ephemeral: true });
+  if (!promo)                                           return interaction.reply({ embeds: [baseEmbed("❌ Invalid Code",  0xE74C3C).setDescription(`Code \`${code}\` does not exist.`)],              flags: MessageFlags.Ephemeral });
+  if (promo.expiresAt && Date.now() > promo.expiresAt)  return interaction.reply({ embeds: [baseEmbed("❌ Expired",       0xE74C3C).setDescription("This promo code has expired.")],                   flags: MessageFlags.Ephemeral });
+  if (promo.maxUses > 0 && promo.uses >= promo.maxUses) return interaction.reply({ embeds: [baseEmbed("❌ Used Up",       0xE74C3C).setDescription("This code has no uses remaining.")],              flags: MessageFlags.Ephemeral });
+  if (promo.usedBy.includes(userId))                    return interaction.reply({ embeds: [baseEmbed("❌ Already Used",  0xE74C3C).setDescription("You've already redeemed this code.")],            flags: MessageFlags.Ephemeral });
 
   promo.usedBy.push(userId);
   promo.uses++;
@@ -116,7 +116,7 @@ async function cmdRedeemPromo(interaction, userId, guildId) {
         { name: "Received", value: `+${promo.amount} ${R}`,                         inline: true },
         { name: "Balance",  value: `${db[guildId][userId].balance.toLocaleString()} ${R}`, inline: true }
       )],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -141,7 +141,7 @@ function processAffiliateWager(guildId, userId, bet) {
 }
 
 async function cmdAffiliatePanel(interaction, guildId) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("aff_create").setLabel("🔗 Create Link").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("aff_earnings").setLabel("📊 My Earnings").setStyle(ButtonStyle.Secondary),
@@ -156,12 +156,12 @@ async function cmdAffiliatePanel(interaction, guildId) {
       `4️⃣ Click **Claim** when you have **${AFF_MIN_CLAIM}+ ${R}** pending\n\n` +
       `⚠️ Accounts under 5 months old do not count.\n⚠️ Rejoining members do not count.`
     ).setTimestamp().setFooter({ text: "🎰 Casino Bot • Affiliate Program" });
-  await interaction.reply({ content: "✅ Panel sent!", ephemeral: true });
+  await interaction.reply({ content: "✅ Panel sent!", flags: MessageFlags.Ephemeral });
   await interaction.channel.send({ embeds: [embed], components: [row] });
 }
 
 async function handleAffiliateButton(interaction, userId, guildId) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const { customId } = interaction;
 
   // Always derive guildId from the interaction itself — never trust passed value alone
@@ -288,10 +288,10 @@ function handleMemberLeave(member) {
 }
 
 async function cmdSetVerifyRole(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const role = interaction.options.getRole("role");
   setGlobal("verifiedRoleId", role.id);
-  await interaction.reply({ content: `✅ Verified role set to **${role.name}**`, ephemeral: true });
+  await interaction.reply({ content: `✅ Verified role set to **${role.name}**`, flags: MessageFlags.Ephemeral });
 }
 
 // ─── PRIZE POOL ───────────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ async function updatePrizepoolPanel(client, guild) {
 }
 
 async function cmdPrizepoolCreate(interaction, client) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const amount = interaction.options.getInteger("amount");
   const pool   = getPrizePool();
   pool.total     = (pool.total || 0) + amount;
@@ -349,18 +349,18 @@ async function cmdPrizepoolCreate(interaction, client) {
       { name: "Added",     value: `+${amount} ${R}`, inline: true },
       { name: "Remaining", value: `${pool.remaining} ${R}`, inline: true }
     )],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
 async function cmdPrizepoolPanel(interaction, client) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const pool = getPrizePool();
   const row  = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("pp_getlink").setLabel("🔗 Get My Link").setStyle(ButtonStyle.Primary).setDisabled(!pool.active),
     new ButtonBuilder().setCustomId("pp_myearnings").setLabel("📊 My Earnings").setStyle(ButtonStyle.Secondary)
   );
-  await interaction.reply({ content: "✅ Prize pool panel sent!", ephemeral: true });
+  await interaction.reply({ content: "✅ Prize pool panel sent!", flags: MessageFlags.Ephemeral });
   const msg = await interaction.channel.send({ embeds: [buildPrizepoolEmbed(pool)], components: [row] });
   pool.panelMsgId     = msg.id;
   pool.panelChannelId = interaction.channelId;
@@ -368,7 +368,7 @@ async function cmdPrizepoolPanel(interaction, client) {
 }
 
 async function handlePrizepoolButton(interaction, userId, guildId, client) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const pool = getPrizePool();
 
   if (interaction.customId === "pp_getlink") {
@@ -445,36 +445,14 @@ async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore) {
       const before = cachedInvitesBefore?.get(code);
       if (!(after && before && after.uses > before.uses) && !(after && !before)) continue;
 
-      // Isolation check — must be prizepool invite only
       const ownership = getInviteOwnership(code);
       if (ownership && ownership !== "prizepool") continue;
 
-      ensureUser(db, guildId, referrerId);
+      // Just mark who referred them — reward is given when they verify
       ensureUser(db, guildId, userId);
-      const reward   = Math.min(PP_REWARD, pool.remaining);
-      pool.remaining -= reward;
-      pool.active     = pool.remaining > 0;
-
-      db[guildId][referrerId].balance         = (db[guildId][referrerId].balance || 0) + reward;
-      db[guildId][referrerId].prizePoolEarned  = (db[guildId][referrerId].prizePoolEarned || 0) + reward;
-      db[guildId][referrerId].prizePoolInvites = (db[guildId][referrerId].prizePoolInvites || 0) + 1;
-      // Mark new member so verify handler knows which system they came from
       db[guildId][userId].prizePoolInviteUsed  = true;
       db[guildId][userId].prizePoolReferredBy  = referrerId;
-      setGlobal("prizePool", pool);
       saveDB(db);
-
-      // Update panel live
-      await updatePrizepoolPanel(client, member.guild);
-
-      // If pool is now empty, delete all prizepool invites
-      if (pool.remaining <= 0) {
-        await cleanupInvites(member.guild, "prizepool").catch(() => {});
-      }
-
-      const ref = await client.users.fetch(referrerId).catch(() => null);
-      if (ref) ref.send({ embeds: [baseEmbed("🏆 Prize Pool Reward!", 0xF4C542)
-        .setDescription(`**${member.user.username}** joined via your prize pool link!\n\n**+${reward} ${R}** added to your balance!`)] }).catch(() => {});
       break;
     }
   } catch (err) { console.error("Prizepool join error:", err); }
@@ -556,10 +534,10 @@ async function updateCodePanel(client, guild) {
 }
 
 async function cmdCreateCode(interaction, client) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   const existing = getGlobal("guessCode");
-  if (existing?.active) return interaction.reply({ content: "❌ A code is already active! Use `/admin endcode` first.", ephemeral: true });
+  if (existing?.active) return interaction.reply({ content: "❌ A code is already active! Use `/admin endcode` first.", flags: MessageFlags.Ephemeral });
 
   const prize    = interaction.options.getInteger("prize");
   const fullCode = generateCode();
@@ -586,7 +564,7 @@ async function cmdCreateCode(interaction, client) {
   cd.panelChannelId = interaction.channelId;
   setGlobal("guessCode", cd);
 
-  await interaction.reply({ content: `✅ Code created! Prize: **${prize} ${R}**`, ephemeral: true });
+  await interaction.reply({ content: `✅ Code created! Prize: **${prize} ${R}**`, flags: MessageFlags.Ephemeral });
 }
 
 async function handleCodeButton(interaction, userId, guildId, client) {
@@ -602,12 +580,12 @@ async function handleCodeButton(interaction, userId, guildId, client) {
           "4️⃣ First correct guess wins the prize!\n\n" +
           "🔠 The code is 8 characters (A-Z, 2-9)."
         )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
   if (customId === "code_getlink") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cd = getGlobal("guessCode");
     if (!cd?.active) return interaction.editReply({ content: "❌ No active code event." });
 
@@ -646,8 +624,8 @@ async function cmdGuess(interaction, userId, guildId) {
   const guess = interaction.options.getString("code").toUpperCase().trim();
   const cd    = getGlobal("guessCode");
 
-  if (!cd?.active) return interaction.reply({ embeds: [baseEmbed("❌ No Active Code", 0xE74C3C).setDescription("No active code event right now!")], ephemeral: true });
-  if (guess.length !== 8) return interaction.reply({ embeds: [baseEmbed("❌ Invalid", 0xE74C3C).setDescription("The code must be exactly 8 characters.")], ephemeral: true });
+  if (!cd?.active) return interaction.reply({ embeds: [baseEmbed("❌ No Active Code", 0xE74C3C).setDescription("No active code event right now!")], flags: MessageFlags.Ephemeral });
+  if (guess.length !== 8) return interaction.reply({ embeds: [baseEmbed("❌ Invalid", 0xE74C3C).setDescription("The code must be exactly 8 characters.")], flags: MessageFlags.Ephemeral });
 
   if (guess === cd.fullCode) {
     cd.active   = false;
@@ -680,7 +658,7 @@ async function cmdGuess(interaction, userId, guildId) {
     await interaction.reply({
       embeds: [baseEmbed("❌ Wrong", 0xE74C3C)
         .setDescription(`**\`${guess}\`** is incorrect.\n\nCurrent hint: \`${codeDisplay(cd.fullCode, cd.revealed)}\``)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 }
@@ -733,9 +711,9 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
 }
 
 async function cmdEndCode(interaction, client) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const cd = getGlobal("guessCode");
-  if (!cd?.active) return interaction.reply({ content: "❌ No active code.", ephemeral: true });
+  if (!cd?.active) return interaction.reply({ content: "❌ No active code.", flags: MessageFlags.Ephemeral });
   cd.active   = false;
   cd.revealed = Array.from({ length: 8 }, (_, i) => i);
   setGlobal("guessCode", cd);
@@ -750,13 +728,13 @@ async function cmdEndCode(interaction, client) {
     }
     saveDB(db);
   }
-  await interaction.reply({ content: `✅ Code ended. Full code: \`${cd.fullCode}\``, ephemeral: true });
+  await interaction.reply({ content: `✅ Code ended. Full code: \`${cd.fullCode}\``, flags: MessageFlags.Ephemeral });
 }
 
 // ─── PRIZEPOOL RESET ──────────────────────────────────────────────────────────
 
 async function cmdPrizepoolReset(interaction, client) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   // Delete all prizepool invites from Discord
   await cleanupInvites(interaction.guild, "prizepool").catch(() => {});
@@ -787,7 +765,7 @@ async function cmdPrizepoolReset(interaction, client) {
   await interaction.reply({
     embeds: [baseEmbed("✅ Prize Pool Reset", 0x2ECC71)
       .setDescription("Prize pool has been reset to 0. All invite links deleted. User earnings cleared.")],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -796,7 +774,7 @@ async function cmdPrizepoolReset(interaction, client) {
 const WAGER_ROLE_MILESTONES = [1000, 5000, 10000, 25000, 50000, 75000, 100000];
 
 async function cmdSetWagerRole(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   const milestone = interaction.options.getInteger("milestone");
   const role      = interaction.options.getRole("role");
@@ -804,7 +782,7 @@ async function cmdSetWagerRole(interaction) {
   if (!WAGER_ROLE_MILESTONES.includes(milestone)) {
     return interaction.reply({
       content: `❌ Invalid milestone. Choose from: ${WAGER_ROLE_MILESTONES.map(m => m.toLocaleString()).join(", ")}`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -817,7 +795,7 @@ async function cmdSetWagerRole(interaction) {
     embeds: [baseEmbed("✅ Wager Role Set", 0x2ECC71)
       .setDescription(`Users who reach **${milestone.toLocaleString()} ${R}** wagered will receive **${role.name}**.`)
       .addFields({ name: "Current Wager Roles", value: buildWagerRolesDisplay(db.wagerRoles, interaction.guild) })],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -833,23 +811,23 @@ function buildWagerRolesDisplay(wagerRoles, guild) {
 }
 
 async function cmdViewWagerRoles(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const db = loadDB();
   await interaction.reply({
     embeds: [baseEmbed("🏷️ Wager Roles", 0x5865F2)
       .setDescription("Roles automatically assigned when users hit wager milestones.")
       .addFields({ name: "Current Setup", value: buildWagerRolesDisplay(db.wagerRoles || {}, interaction.guild) })],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
 // ─── VERIFY PANEL ─────────────────────────────────────────────────────────────
 
 async function cmdVerifyPanel(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   const roleId = getGlobal("verifiedRoleId");
-  if (!roleId) return interaction.reply({ content: "❌ Set a verify role first with `/admin setrole`.", ephemeral: true });
+  if (!roleId) return interaction.reply({ content: "❌ Set a verify role first with `/admin setrole`.", flags: MessageFlags.Ephemeral });
 
   const embed = new EmbedBuilder()
     .setColor(0x2ECC71)
@@ -871,12 +849,12 @@ async function cmdVerifyPanel(interaction) {
       .setStyle(ButtonStyle.Success)
   );
 
-  await interaction.reply({ content: "✅ Verify panel sent!", ephemeral: true });
+  await interaction.reply({ content: "✅ Verify panel sent!", flags: MessageFlags.Ephemeral });
   await interaction.channel.send({ embeds: [embed], components: [row] });
 }
 
 async function handleVerifyButton(interaction, userId, guildId, client) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const db = loadDB();
 
@@ -955,34 +933,57 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
     } catch { /* invite creation failed — not critical */ }
   }
 
-  // 2. Prize pool referral
+  // 2. Prize pool referral — credit the inviter NOW (on verify, not on join)
   else if (u.prizePoolInviteUsed) {
-    const ppInvites = db.prizePoolInvites || {};
-    // Find who referred them
-    let ppReferrerId = null;
-    for (const [, refId] of Object.entries(ppInvites)) {
-      if (db[guildId]?.[userId]?.prizePoolReferredBy === refId) { ppReferrerId = refId; break; }
-    }
-    // Fallback: check prizePoolReferredBy directly
-    if (!ppReferrerId && u.prizePoolReferredBy) ppReferrerId = u.prizePoolReferredBy;
-
+    const ppReferrerId = u.prizePoolReferredBy || null;
     const ref = ppReferrerId ? await client.users.fetch(ppReferrerId).catch(() => null) : null;
     inviteSourceMsg = ref
       ? `\n\n🏆 You joined via **${ref.username}'s** prize pool link.`
       : "\n\n🏆 You joined via a prize pool link.";
 
-    // Give the new user their own prize pool invite link
-    const pool = getPrizePool();
-    if (pool.active && pool.remaining > 0) {
+    // Credit the referrer now that the user is verified
+    if (ppReferrerId) {
+      const pool = getPrizePool();
+      if (pool.active && pool.remaining > 0) {
+        const db3 = loadDB();
+        ensureUser(db3, guildId, ppReferrerId);
+        const reward    = Math.min(PP_REWARD, pool.remaining);
+        pool.remaining -= reward;
+        pool.active     = pool.remaining > 0;
+        db3[guildId][ppReferrerId].balance         = (db3[guildId][ppReferrerId].balance || 0) + reward;
+        db3[guildId][ppReferrerId].prizePoolEarned  = (db3[guildId][ppReferrerId].prizePoolEarned || 0) + reward;
+        db3[guildId][ppReferrerId].prizePoolInvites = (db3[guildId][ppReferrerId].prizePoolInvites || 0) + 1;
+        setGlobal("prizePool", pool);
+        saveDB(db3);
+
+        // Update the panel
+        await updatePrizepoolPanel(client, interaction.guild);
+
+        // If pool empty, clean up invites
+        if (pool.remaining <= 0) await cleanupInvites(interaction.guild, "prizepool").catch(() => {});
+
+        // DM the referrer
+        if (ref) ref.send({ embeds: [baseEmbed("🏆 Prize Pool Reward!", 0xF4C542)
+          .setDescription(`**${interaction.user.username}** joined via your prize pool link and just verified!\n\n**+${reward} ${R}** added to your balance!`)] }).catch(() => {});
+      }
+    }
+
+    // Give the new verified user their own prize pool invite link
+    const pool2 = getPrizePool();
+    if (pool2.active && pool2.remaining > 0) {
       try {
-        const inv = await interaction.channel.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `PrizePool:${userId}` });
-        const db2 = loadDB();
-        if (!db2.prizePoolInvites) db2.prizePoolInvites = {};
-        db2.prizePoolInvites[inv.code]           = userId;
-        db2[guildId][userId].prizePoolInviteUrl   = inv.url;
-        db2[guildId][userId].prizePoolInviteCode  = inv.code;
-        saveDB(db2);
-        inviteForUser = inv.url;
+        const ch = interaction.channel || await client.channels.fetch(interaction.channelId).catch(() => null);
+        if (ch) {
+          const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `PrizePool:${userId}` });
+          const db2 = loadDB();
+          if (!db2.prizePoolInvites) db2.prizePoolInvites = {};
+          ensureUser(db2, guildId, userId);
+          db2.prizePoolInvites[inv.code]           = userId;
+          db2[guildId][userId].prizePoolInviteUrl   = inv.url;
+          db2[guildId][userId].prizePoolInviteCode  = inv.code;
+          saveDB(db2);
+          inviteForUser = inv.url;
+        }
       } catch { /* not critical */ }
     }
   }
@@ -1069,7 +1070,8 @@ async function cmdHelp(interaction) {
           "`/prizepool` — Invite friends to earn from the prize pool\n" +
           "`/guess <code>` — Crack the 8-char code to win the prize\n" +
           "`/withdraw <amount> <asset_id>` — Cash out to real Robux\n" +
-          "`/withdrawpanel` — How to withdraw guide",
+          "`/withdrawpanel` — How to withdraw guide\n" +
+          "`/unfreeze` — Clear a frozen game (no refund)",
         inline: false,
       },
       {
@@ -1090,7 +1092,7 @@ async function cmdHelp(interaction) {
 // ─── ADMIN HELP ───────────────────────────────────────────────────────────────
 
 async function cmdAdminHelp(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   await interaction.reply({
     embeds: [new EmbedBuilder().setColor(0xE74C3C).setTitle("🛡️ Admin Commands")
       .setDescription("Only visible to the server owner.")
@@ -1105,7 +1107,7 @@ async function cmdAdminHelp(interaction) {
         { name: "💸 Withdrawals",  value: "`/admin setwithdrawchannel channel`\n`/admin setwithdrawmin amount`\n`/withdrawpanel` (user-facing info panel)" }
       )
       .setTimestamp().setFooter({ text: "🎰 Casino Bot • Admin" })],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -1115,10 +1117,10 @@ async function cmdDeposit(interaction, guildId, targetUser, amount, client) {
   // Owner OR Administrator permission
   const hasAdmin = interaction.member?.permissions?.has?.("Administrator");
   if (!isOwner(interaction) && !hasAdmin) {
-    return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   }
   if (!targetUser || !amount || amount < 1) {
-    return interaction.reply({ content: "❌ Usage: `/deposit @user amount`", ephemeral: true });
+    return interaction.reply({ content: "❌ Usage: `/deposit @user amount`", flags: MessageFlags.Ephemeral });
   }
 
   const db = loadDB();
@@ -1180,7 +1182,7 @@ async function cmdDeposit(interaction, guildId, targetUser, amount, client) {
         { name: "New Balance", value: `${newBal.toLocaleString()} ${R}`,    inline: true },
         ...(bonusLine ? [{ name: "Bonus", value: bonusLine, inline: false }] : [])
       )],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -1200,7 +1202,7 @@ function genTxId() {
 // ── /withdraw panel ──────────────────────────────────────────────────────────
 
 async function cmdWithdrawPanel(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
 
   const embed = new EmbedBuilder()
     .setColor(0xF4C542)
@@ -1233,26 +1235,26 @@ async function cmdWithdrawPanel(interaction) {
     .setTimestamp()
     .setFooter({ text: "🎰 Casino Bot • Withdrawals" });
 
-  await interaction.reply({ content: "✅ Withdrawal panel sent!", ephemeral: true });
+  await interaction.reply({ content: "✅ Withdrawal panel sent!", flags: MessageFlags.Ephemeral });
   await interaction.channel.send({ embeds: [embed] });
 }
 
 // ── /admin setwithdrawchannel ─────────────────────────────────────────────────
 
 async function cmdSetWithdrawChannel(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const channel = interaction.options.getChannel("channel");
   setGlobal("withdrawChannelId", channel.id);
-  await interaction.reply({ content: `✅ Withdrawal admin channel set to <#${channel.id}>.`, ephemeral: true });
+  await interaction.reply({ content: `✅ Withdrawal admin channel set to <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
 }
 
 // ── /admin setwithdrawmin ─────────────────────────────────────────────────────
 
 async function cmdSetWithdrawMin(interaction) {
-  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
   const min = interaction.options.getInteger("amount");
   setGlobal("withdrawMin", min);
-  await interaction.reply({ content: `✅ Minimum withdrawal set to **${min} ${R}**.`, ephemeral: true });
+  await interaction.reply({ content: `✅ Minimum withdrawal set to **${min} ${R}**.`, flags: MessageFlags.Ephemeral });
 }
 
 // ── /withdraw (user command) ──────────────────────────────────────────────────
@@ -1268,7 +1270,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Withdrawals Unavailable", 0xE74C3C)
         .setDescription("Withdrawals are not set up yet. Please contact an admin.")],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1277,7 +1279,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Below Minimum", 0xE74C3C)
         .setDescription(`Minimum withdrawal is **${min} ${R}**. You tried to withdraw **${amount} ${R}**.`)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1290,7 +1292,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Insufficient Balance", 0xE74C3C)
         .setDescription(`You need **${amount.toLocaleString()} ${R}** but only have **${(u.balance || 0).toLocaleString()} ${R}**.`)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1299,7 +1301,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Already Pending", 0xE74C3C)
         .setDescription(`You already have a pending withdrawal of **${u.pendingWithdrawal.amount} ${R}**.\nCancel it or wait for an admin to process it first.`)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1312,7 +1314,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("⏳ Cooldown", 0xE74C3C)
         .setDescription(`You can withdraw again in **${hrs}h ${mins}m**.`)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1331,7 +1333,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
           `✅ Wagered so far: **${totalWagered.toLocaleString()} ${R}**\n` +
           `⏳ Still need: **${remaining.toLocaleString()} ${R}** more wager`
         )],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1366,7 +1368,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ DMs Closed", 0xE74C3C)
         .setDescription("Please enable DMs from server members so the bot can send you the withdrawal confirmation.")],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1411,7 +1413,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Could Not DM You", 0xE74C3C)
         .setDescription("Failed to send you a DM. Please enable DMs from server members and try again.")],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -1426,7 +1428,7 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
   await interaction.reply({
     embeds: [baseEmbed("📬 Check Your DMs!", 0x2ECC71)
       .setDescription(`A confirmation has been sent to your DMs.\nReview and confirm your withdrawal there.\n\n**${amount.toLocaleString()} ${R}** has been held from your balance pending confirmation.`)],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -1459,8 +1461,8 @@ async function handleWithdrawButton(interaction, client) {
     const tx = db[txGuildId][txUser].pendingWithdrawal;
 
     // Only the owner of the tx can confirm
-    if (user.id !== txUser) return interaction.followUp({ content: "❌ This is not your withdrawal.", ephemeral: true }).catch(() => {});
-    if (tx.status !== "awaiting_user") return interaction.followUp({ content: "❌ This withdrawal has already been processed.", ephemeral: true }).catch(() => {});
+    if (user.id !== txUser) return interaction.followUp({ content: "❌ This is not your withdrawal.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    if (tx.status !== "awaiting_user") return interaction.followUp({ content: "❌ This withdrawal has already been processed.", flags: MessageFlags.Ephemeral }).catch(() => {});
 
     // Update status
     tx.status = "pending_admin";
@@ -1566,7 +1568,7 @@ async function handleWithdrawButton(interaction, client) {
     }
 
     const tx = db[txGuildId][txUser].pendingWithdrawal;
-    if (user.id !== txUser) return interaction.followUp({ content: "❌ This is not your withdrawal.", ephemeral: true }).catch(() => {});
+    if (user.id !== txUser) return interaction.followUp({ content: "❌ This is not your withdrawal.", flags: MessageFlags.Ephemeral }).catch(() => {});
     if (tx.status === "done") return interaction.editReply({ embeds: [baseEmbed("❌ Already Processed", 0xE74C3C).setDescription("This withdrawal has already been approved and cannot be cancelled.")], components: [] }).catch(() => {});
 
     // Refund
@@ -1606,7 +1608,7 @@ async function handleWithdrawButton(interaction, client) {
 
   // ── Admin: Approve withdrawal ─────────────────────────────────────────────
   else if (customId.startsWith("wd_approve_")) {
-    if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
     const txId = customId.replace("wd_approve_", "");
     await interaction.deferUpdate();
 
@@ -1690,7 +1692,7 @@ async function handleWithdrawButton(interaction, client) {
 
   // ── Admin: Deny withdrawal ────────────────────────────────────────────────
   else if (customId.startsWith("wd_deny_")) {
-    if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", ephemeral: true });
+    if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
     const txId = customId.replace("wd_deny_", "");
     await interaction.deferUpdate();
 
