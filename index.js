@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Collection } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Collection, MessageFlags } = require("discord.js");
 const { connectDB, loadDB } = require("./db");
 const {
   cmdBalance, cmdLeaderboard, cmdProfile,
@@ -11,6 +11,7 @@ const {
   cmdSlots, cmdCoinflip, cmdRoulette, cmdBlackjack,
   cmdCrash, cmdMines, cmdTowers, cmdKeno, cmdLimbo,
   handleBlackjack, handleMines, handleTowers,
+  cmdUnfreeze,
 } = require("./games");
 const {
   cmdCreatePromo, cmdRedeemPromo,
@@ -113,6 +114,8 @@ const commands = [
   new SlashCommandBuilder().setName("rakeback").setDescription("Check and claim your rakeback rewards"),
 
   new SlashCommandBuilder().setName("wheel").setDescription("Spin the wheel of fortune! (Once every 24h, or use an invite spin)"),
+
+  new SlashCommandBuilder().setName("unfreeze").setDescription("Clear a frozen game — no refund will be given"),
 
   new SlashCommandBuilder().setName("withdraw").setDescription("Withdraw your Robux balance to your Roblox account")
     .addIntegerOption(o => o.setName("amount").setDescription("Amount to withdraw (min 10)").setRequired(true))
@@ -218,13 +221,14 @@ async function handleSlash(interaction) {
     if (wait > 0) {
       return interaction.reply({
         embeds: [baseEmbed("⏳ Slow Down!", COLORS.red).setDescription(`Use **/${commandName}** again in **${wait}s**.`)],
-        flags: 64
+        flags: MessageFlags.Ephemeral
       });
     }
   }
 
   switch (commandName) {
     case "help":        return cmdHelp(interaction);
+    case "unfreeze":    return cmdUnfreeze(interaction, userId, guildId);
     case "withdraw":    return cmdWithdraw(interaction, userId, guildId, interaction.client);
     case "withdrawpanel": return cmdWithdrawPanel(interaction);
     case "balance":     return cmdBalance(interaction, userId, guildId, interaction.options.getUser("user"));
@@ -247,8 +251,8 @@ async function handleSlash(interaction) {
     case "rakeback":    return cmdRakeback(interaction, userId, guildId);
     case "wheel":       return cmdWheel(interaction, userId, guildId);
     case "promo":       return cmdRedeemPromo(interaction, userId, guildId);
-    case "affiliate":   return interaction.reply({ content: "Use the affiliate panel buttons!", ephemeral: true });
-    case "prizepool":   return interaction.reply({ content: "Use the prize pool panel buttons!", ephemeral: true });
+    case "affiliate":   return interaction.reply({ content: "Use the affiliate panel buttons!", flags: MessageFlags.Ephemeral });
+    case "prizepool":   return interaction.reply({ content: "Use the prize pool panel buttons!", flags: MessageFlags.Ephemeral });
     case "guess":       return cmdGuess(interaction, userId, guildId);
     case "admin": {
       const sub = interaction.options.getSubcommand();
@@ -318,7 +322,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton())           return await handleButton(interaction);
   } catch (err) {
     console.error("Interaction error:", err);
-    const msg = { embeds: [baseEmbed("❌ Error", COLORS.red).setDescription("Something went wrong. Please try again.")], flags: 64 };
+    const msg = { embeds: [baseEmbed("❌ Error", COLORS.red).setDescription("Something went wrong. Please try again.")], flags: MessageFlags.Ephemeral };
     if (interaction.replied || interaction.deferred) interaction.followUp(msg).catch(() => {});
     else interaction.reply(msg).catch(() => {});
   }
