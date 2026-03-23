@@ -1,6 +1,80 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const { getBalance, addBalance, removeBalance, recordGame, baseEmbed, COLORS, R, WHEEL_BONUS_KEYS } = require("./economy");
 const { loadDB, saveDB } = require("./db");
+
+// ─── Active Game Tracker ──────────────────────────────────────────────────────
+// Tracks which users currently have an active game running.
+// Key: `${guildId}-${userId}`, Value: game name string
+
+const activeGames = new Map();
+
+function startGame(guildId, userId, gameName) {
+  activeGames.set(`${guildId}-${userId}`, gameName);
+}
+
+function endGame(guildId, userId) {
+  activeGames.delete(`${guildId}-${userId}`);
+}
+
+function getActiveGame(guildId, userId) {
+  return activeGames.get(`${guildId}-${userId}`) || null;
+}
+
+// Call at the start of every game — returns true if blocked
+async function checkActiveGame(interaction, guildId, userId) {
+  const active = getActiveGame(guildId, userId);
+  if (!active) return false;
+  await interaction.reply({
+    embeds: [baseEmbed("⏳ Game Already Running", COLORS.red)
+      .setDescription(
+        `You already have an active **${active}** game!\n\n` +
+        `Finish or cash out your current game first.\n` +
+        `If your game is frozen, use \`/unfreeze\` to clear it (no refund).`
+      )],
+    flags: MessageFlags.Ephemeral
+  });
+  return true;
+}
+
+// ─── /unfreeze ────────────────────────────────────────────────────────────────
+
+async function cmdUnfreeze(interaction, userId, guildId) {
+  const active = getActiveGame(guildId, userId);
+
+  // Also check persistent game maps for dangling state
+  const bjKey     = `${guildId}-${userId}`;
+  const hasBj     = bjGames.has(bjKey);
+  const hasMines  = mineGames.has(bjKey);
+  const hasTowers = towerGames.has(bjKey);
+  const hasCrash  = crashGames.has(bjKey);
+
+  if (!active && !hasBj && !hasMines && !hasTowers && !hasCrash) {
+    return interaction.reply({
+      embeds: [baseEmbed("✅ No Active Game", COLORS.green)
+        .setDescription("You don't have any frozen or active games to clear.")],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  // Clear everything — no refund
+  endGame(guildId, userId);
+  bjGames.delete(bjKey);
+  mineGames.delete(bjKey);
+  towerGames.delete(bjKey);
+  crashGames.delete(bjKey);
+
+  await interaction.reply({
+    embeds: [baseEmbed("🔓 Game Cleared", COLORS.gold)
+      .setDescription(
+        `Your frozen **${active || "game"}** has been cleared.\n\n` +
+        `⚠️ No refund is given for cleared games.\n` +
+        `You can now start a new game.`
+      )],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,12 +184,12 @@ async function checkWagerRole(interaction, guildId, userId, recordResult) {
 async function validateBet(interaction, guildId, userId, bet) {
   bet = parseInt(bet);
   if (!bet || isNaN(bet) || bet < 1) {
-    await interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet", COLORS.red).setDescription(`Minimum bet is **1 ${R}**.\n\nExample: \`$slots 5\``)], flags: 64 });
+    await interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet", COLORS.red).setDescription(`Minimum bet is **1 ${R}**.\n\nExample: \`$slots 5\``)], flags: MessageFlags.Ephemeral });
     return false;
   }
   const bal = getBalance(guildId, userId);
   if (bal < bet) {
-    await interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You need **${bet.toLocaleString()} ${R}** but only have **${bal.toLocaleString()} ${R}**.`)], flags: 64 });
+    await interaction.reply({ embeds: [baseEmbed("❌ Insufficient Funds", COLORS.red).setDescription(`You need **${bet.toLocaleString()} ${R}** but only have **${bal.toLocaleString()} ${R}**.`)], flags: MessageFlags.Ephemeral });
     return false;
   }
   return true;
@@ -140,8 +214,10 @@ function spinSlot() {
 }
 
 async function cmdSlots(interaction, userId, guildId, bet) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
+  startGame(guildId, userId, "Slots");
   removeBalance(guildId, userId, bet);
 
   const reels = [spinSlot(), spinSlot(), spinSlot()];
@@ -182,16 +258,19 @@ async function cmdSlots(interaction, userId, guildId, bet) {
     );
 
   await interaction.reply({ embeds: [embed] });
+  endGame(guildId, userId);
 }
 
 // ─── COINFLIP ─────────────────────────────────────────────────────────────────
 
 async function cmdCoinflip(interaction, userId, guildId, bet, choice) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
   if (!choice || !["heads", "tails"].includes(choice.toLowerCase())) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Choice", COLORS.red).setDescription("Choose **heads** or **tails**.\n\nExample: `$cf 5 heads`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Choice", COLORS.red).setDescription("Choose **heads** or **tails**.")], flags: MessageFlags.Ephemeral });
   }
+  startGame(guildId, userId, "Coinflip");
 
   const choiceFmt = choice.toLowerCase() === "heads" ? "🟡 Heads" : "⚪ Tails";
   const confirmEmbed = baseEmbed("🪙 Coinflip — Confirm", COLORS.blue)
@@ -212,10 +291,11 @@ async function cmdCoinflip(interaction, userId, guildId, bet, choice) {
   if (!collector) return;
 
   collector.on("collect", async (btn) => {
-    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", ephemeral: true });
+    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", flags: MessageFlags.Ephemeral });
     await btn.deferUpdate();
 
     if (btn.customId === "cf_cancel") {
+      endGame(guildId, userId);
       const cancelEmbed = baseEmbed("🪙 Coinflip Cancelled", COLORS.red).setDescription("Bet cancelled. No coins were deducted.");
       return btn.editReply({ embeds: [cancelEmbed], components: [] });
     }
@@ -255,6 +335,7 @@ async function cmdCoinflip(interaction, userId, guildId, bet, choice) {
             { name: "Balance", value: `${getBalance(guildId, userId).toLocaleString()} ${R}`, inline: true }
           );
         await btn.editReply({ embeds: [embed], components: [] }).catch(() => {});
+        endGame(guildId, userId);
         return;
       }
       await btn.editReply({ embeds: [spinEmbed(spinFrames[spinIdx])], components: [] }).catch(() => {});
@@ -264,6 +345,7 @@ async function cmdCoinflip(interaction, userId, guildId, bet, choice) {
 
   collector.on("end", (_, reason) => {
     if (reason === "time") {
+      endGame(guildId, userId);
       interaction.editReply({ embeds: [baseEmbed("🪙 Coinflip Expired", COLORS.red).setDescription("You didn't confirm in time.")], components: [] }).catch(() => {});
     }
   });
@@ -274,17 +356,19 @@ async function cmdCoinflip(interaction, userId, guildId, bet, choice) {
 const RED_NUMS = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
 
 async function cmdRoulette(interaction, userId, guildId, bet, betType) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
   if (!betType) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet Type", COLORS.red).setDescription("Options: `red` `black` `green` `even` `odd` or a number 0–36\n\nExample: `$roulette 5 red`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet Type", COLORS.red).setDescription("Options: `red` `black` `green` `even` `odd` or a number 0–36")], flags: MessageFlags.Ephemeral });
   }
+  startGame(guildId, userId, "Roulette");
 
   const bt = betType.toLowerCase();
   const validTypes = ["red","black","green","even","odd"];
   const isNumBet = !isNaN(parseInt(bt)) && parseInt(bt) >= 0 && parseInt(bt) <= 36;
   if (!validTypes.includes(bt) && !isNumBet) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet Type", COLORS.red).setDescription("Options: `red` `black` `green` `even` `odd` or a number 0–36")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Bet Type", COLORS.red).setDescription("Options: `red` `black` `green` `even` `odd` or a number 0–36")], flags: MessageFlags.Ephemeral });
   }
 
   const confirmEmbed = baseEmbed("🎡 Roulette — Confirm", COLORS.blue)
@@ -300,10 +384,11 @@ async function cmdRoulette(interaction, userId, guildId, bet, betType) {
   const collector = (msg || interaction).createMessageComponentCollector({ time: 30000, max: 1 });
 
   collector.on("collect", async (btn) => {
-    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", ephemeral: true });
+    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", flags: MessageFlags.Ephemeral });
     await btn.deferUpdate();
 
     if (btn.customId === "rl_cancel") {
+      endGame(guildId, userId);
       return btn.editReply({ embeds: [baseEmbed("🎡 Roulette Cancelled", COLORS.red).setDescription("Bet cancelled.")], components: [] });
     }
 
@@ -358,6 +443,7 @@ async function cmdRoulette(interaction, userId, guildId, bet, betType) {
           );
 
         await btn.editReply({ embeds: [embed], components: [] }).catch(() => {});
+        endGame(guildId, userId);
         return;
       }
       await btn.editReply({ embeds: [spinEmbed(wheelFrames[spinIdx])], components: [] }).catch(() => {});
@@ -367,6 +453,7 @@ async function cmdRoulette(interaction, userId, guildId, bet, betType) {
 
   collector.on("end", (_, reason) => {
     if (reason === "time") {
+      endGame(guildId, userId);
       (msg || interaction).editReply?.({ embeds: [baseEmbed("🎡 Roulette Expired", COLORS.red).setDescription("You didn't confirm in time.")], components: [] }).catch(() => {});
     }
   });
@@ -395,8 +482,10 @@ function showHand(hand) { return hand.map(c => `\`${c.r}${c.s}\``).join(" "); }
 const bjGames = new Map();
 
 async function cmdBlackjack(interaction, userId, guildId, bet) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
+  startGame(guildId, userId, "Blackjack");
   removeBalance(guildId, userId, bet);
 
   const deck = newDeck();
@@ -411,6 +500,7 @@ async function cmdBlackjack(interaction, userId, guildId, bet) {
     addBalance(guildId, userId, bjPayout);
     const rr = recordGame(guildId, userId, "blackjack", bet, bjPayout - bet);
     await checkWagerRole(interaction, guildId, userId, rr);
+    endGame(guildId, userId);
     const embed = baseEmbed("🃏 Blackjack — Blackjack!", COLORS.gold)
       .setDescription(`**Your Hand:** ${showHand(playerHand)} = **21**\n**Dealer:** ${showHand([dealerHand[0]])} + 🂠\n\n🎉 **BLACKJACK! ×2.5!**${bonusMsg}`)
       .addFields(
@@ -444,15 +534,15 @@ async function handleBlackjack(interaction) {
   const key = `${guildId}-${user.id}`;
   const game = bjGames.get(key);
 
-  if (!game) return interaction.followUp({ content: "No active blackjack game!", ephemeral: true });
-  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", ephemeral: true });
+  if (!game) return interaction.followUp({ content: "No active blackjack game!", flags: MessageFlags.Ephemeral });
+  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", flags: MessageFlags.Ephemeral });
 
   const { deck, playerHand, dealerHand } = game;
   let { bet } = game;
 
   if (customId === "bj_hit" || customId === "bj_double") {
     if (customId === "bj_double") {
-      if (getBalance(guildId, user.id) < bet) return interaction.followUp({ content: "Not enough coins to double down!", ephemeral: true });
+      if (getBalance(guildId, user.id) < bet) return interaction.followUp({ content: "Not enough coins to double down!", flags: MessageFlags.Ephemeral });
       removeBalance(guildId, user.id, bet);
       bet *= 2;
       game.bet = bet;
@@ -464,6 +554,7 @@ async function handleBlackjack(interaction) {
     if (pVal > 21) {
       bjGames.delete(key);
       recordGame(guildId, user.id, "blackjack", bet, -bet);
+      endGame(guildId, user.id);
       const embed = baseEmbed("🃏 Blackjack — Bust!", COLORS.red)
         .setDescription(`**Your Hand:** ${showHand(playerHand)} = **${pVal}** 💥 BUST!`)
         .addFields(
@@ -526,6 +617,7 @@ async function resolveBlackjack(interaction, game) {
   const profit = winnings > bet ? winnings - bet : winnings === bet ? 0 : -bet;
   const rr = recordGame(guildId, userId, "blackjack", bet, profit);
   await checkWagerRole(interaction, guildId, userId, rr);
+  endGame(guildId, userId);
 
   const embed = baseEmbed("🃏 Blackjack — Result", color)
     .setDescription(`**Your Hand:** ${showHand(playerHand)} = **${pVal}**\n**Dealer Hand:** ${showHand(dealerHand)} = **${dVal}**\n\n${result}${bonusMsg}`)
@@ -543,8 +635,10 @@ async function resolveBlackjack(interaction, game) {
 const crashGames = new Map();
 
 async function cmdCrash(interaction, userId, guildId, bet) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
+  startGame(guildId, userId, "Crash");
   removeBalance(guildId, userId, bet);
 
   // Casino-grade crash distribution (8% house edge):
@@ -575,6 +669,7 @@ async function cmdCrash(interaction, userId, guildId, bet) {
   if (crashPoint <= 1.00) {
     crashGames.delete(`${guildId}-${userId}`);
     recordGame(guildId, userId, "crash", bet, -bet);
+    endGame(guildId, userId);
     const instantEmbed = baseEmbed("📈 Crash — 💥 INSTANT CRASH!", COLORS.red)
       .setDescription(`The game crashed at **1.00×** before it even started! 💀`)
       .addFields(
@@ -612,6 +707,7 @@ async function cmdCrash(interaction, userId, guildId, bet) {
       crashGames.delete(`${guildId}-${userId}`);
       recordGame(guildId, userId, "crash", bet, -bet);
       const { bonusMsg: lossMsg } = applyActiveBonusOnLoss(guildId, userId, bet);
+      endGame(guildId, userId);
       const embed = baseEmbed("📈 Crash — 💥 CRASHED!", COLORS.red)
         .setDescription(`Crashed at **${crashPoint}×**! You lost your bet.${lossMsg}`)
         .addFields(
@@ -632,8 +728,12 @@ async function cmdCrash(interaction, userId, guildId, bet) {
 
   const collector = msg.createMessageComponentCollector({ time: 60000 });
   collector.on("collect", async (btn) => {
-    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", ephemeral: true });
+    if (btn.user.id !== userId) return btn.reply({ content: "Not your game!", flags: MessageFlags.Ephemeral });
     if (game.cashed) return;
+
+    // Defer immediately — must happen within 3 seconds of click
+    await btn.deferUpdate().catch(() => {});
+
     game.cashed = true;
     clearInterval(interval);
     crashGames.delete(`${guildId}-${userId}`);
@@ -644,6 +744,7 @@ async function cmdCrash(interaction, userId, guildId, bet) {
     addBalance(guildId, userId, payout);
     const rr = recordGame(guildId, userId, "crash", bet, payout - bet);
     await checkWagerRole(btn, guildId, userId, rr);
+    endGame(guildId, userId);
 
     const embed = baseEmbed("📈 Crash — Cashed Out!", COLORS.green)
       .setDescription(`You cashed out at **${current}×**!${bonusMsg}`)
@@ -651,7 +752,7 @@ async function cmdCrash(interaction, userId, guildId, bet) {
         { name: "Won",     value: `+${feeDisplay(gross, net)}${payout !== net ? ` → **${payout.toLocaleString()} ${R}** (bonus)` : ""}`, inline: true },
         { name: "Balance", value: `${getBalance(guildId, userId).toLocaleString()} ${R}`, inline: true }
       );
-    await btn.update({ embeds: [embed], components: [] });
+    await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
     collector.stop();
   });
 }
@@ -662,12 +763,14 @@ const mineGames = new Map();
 const MINES_TOTAL = 25;
 
 async function cmdMines(interaction, userId, guildId, bet, mineCount) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   mineCount = parseInt(mineCount);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
   if (!mineCount || isNaN(mineCount) || mineCount < 1 || mineCount > 20) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Mines", COLORS.red).setDescription(`Choose between **1 and 20** mines.\n\nExample: \`$mines 100 3\``)], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Mines", COLORS.red).setDescription(`Choose between **1 and 20** mines.`)], flags: MessageFlags.Ephemeral });
   }
+  startGame(guildId, userId, "Mines");
   removeBalance(guildId, userId, bet);
 
   const mines = new Set();
@@ -769,6 +872,7 @@ async function endMinesGame(interaction, game, hitMine, clearedBoard) {
   if (payout > 0) addBalance(game.guildId, game.userId, payout);
   const rr = recordGame(game.guildId, game.userId, "mines", game.bet, payout > 0 ? payout - game.bet : -game.bet);
   await checkWagerRole(interaction, game.guildId, game.userId, rr);
+  endGame(game.guildId, game.userId);
 
   const color = hitMine ? COLORS.red : clearedBoard ? COLORS.gold : COLORS.green;
   const title = hitMine ? "💣 Mines — BOOM! 💥" : clearedBoard ? "💣 Mines — Board Cleared! 🏆" : "💣 Mines — Cashed Out!";
@@ -807,11 +911,11 @@ async function handleMines(interaction) {
   const key = `${guildId}-${user.id}`;
   const game = mineGames.get(key);
 
-  if (!game) return interaction.followUp({ content: "No active mines game!", ephemeral: true });
-  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", ephemeral: true });
+  if (!game) return interaction.followUp({ content: "No active mines game!", flags: MessageFlags.Ephemeral });
+  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", flags: MessageFlags.Ephemeral });
 
   if (customId === "mines_cashout") {
-    if (game.revealed.size === 0) return interaction.followUp({ content: "Find at least one gem first!", ephemeral: true });
+    if (game.revealed.size === 0) return interaction.followUp({ content: "Find at least one gem first!", flags: MessageFlags.Ephemeral });
     return endMinesGame(interaction, game, false, false);
   }
 
@@ -876,14 +980,15 @@ function buildTowerGrid(game, gameOver = false, hitFloor = -1) {
 }
 
 async function cmdTowers(interaction, userId, guildId, bet, difficulty) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
 
   const diff = (difficulty || "easy").toLowerCase();
   if (!TOWER_DIFFICULTIES[diff]) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Difficulty", COLORS.red).setDescription("Choose: `easy` `medium` or `hard`\n\nExample: `$towers 5 medium`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Difficulty", COLORS.red).setDescription("Choose: `easy` `medium` or `hard`")], flags: MessageFlags.Ephemeral });
   }
-
+  startGame(guildId, userId, "Towers");
   removeBalance(guildId, userId, bet);
 
   const cfg = TOWER_DIFFICULTIES[diff];
@@ -954,8 +1059,8 @@ async function handleTowers(interaction) {
   const key = `${guildId}-${user.id}`;
   const game = towerGames.get(key);
 
-  if (!game) return interaction.followUp({ content: "No active towers game!", ephemeral: true });
-  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", ephemeral: true });
+  if (!game) return interaction.followUp({ content: "No active towers game!", flags: MessageFlags.Ephemeral });
+  if (game.userId !== user.id) return interaction.followUp({ content: "Not your game!", flags: MessageFlags.Ephemeral });
 
   if (customId === "tower_cashout") {
     towerGames.delete(key);
@@ -966,6 +1071,7 @@ async function handleTowers(interaction) {
     addBalance(guildId, user.id, payout);
     const rr = recordGame(guildId, user.id, "towers", game.bet, payout - game.bet);
     await checkWagerRole(interaction, guildId, user.id, rr);
+    endGame(guildId, user.id);
     const cfg = TOWER_DIFFICULTIES[game.difficulty];
     const embed = baseEmbed(`🗼 Towers — Cashed Out! 💸`, COLORS.green)
       .setDescription(`You walked away after **${game.currentFloor}** floor(s)! (${cfg.label})${bonusMsg}\n\n${buildTowerGrid(game)}`)
@@ -986,6 +1092,7 @@ async function handleTowers(interaction) {
     towerGames.delete(key);
     const rr2 = recordGame(guildId, user.id, "towers", game.bet, -game.bet);
     await checkWagerRole(interaction, guildId, user.id, rr2);
+    endGame(guildId, user.id);
     const { bonusMsg: lossMsg } = applyActiveBonusOnLoss(guildId, user.id, game.bet);
     const embed = baseEmbed("🗼 Towers — BOOM! 💥", COLORS.red)
       .setDescription(`You hit a bomb on **Floor ${floor + 1}**!${lossMsg}\n\n${buildTowerGrid(game, true, floor)}`)
@@ -1008,6 +1115,7 @@ async function handleTowers(interaction) {
     addBalance(guildId, user.id, payout);
     const rr3 = recordGame(guildId, user.id, "towers", game.bet, payout - game.bet);
     await checkWagerRole(interaction, guildId, user.id, rr3);
+    endGame(guildId, user.id);
     const embed = baseEmbed("🗼 Towers — TOP REACHED! 🏆", COLORS.gold)
       .setDescription(`You conquered the entire tower!${bonusMsg}\n\n${buildTowerGrid(game)}`)
       .addFields(
@@ -1038,15 +1146,17 @@ const KENO_PAYOUTS = {
 };
 
 async function cmdKeno(interaction, userId, guildId, bet, picks) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   if (!await validateBet(interaction, guildId, userId, bet)) return;
   if (!picks) {
-    return interaction.reply({ embeds: [baseEmbed("❌ No Picks", COLORS.red).setDescription(`Provide 2–10 numbers (1–80).\n\nExample: \`$keno 100 3,7,15,22\``)], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ No Picks", COLORS.red).setDescription(`Provide 2–10 numbers (1–80).`)], flags: MessageFlags.Ephemeral });
   }
+  startGame(guildId, userId, "Keno");
 
   const chosen = [...new Set(picks.split(",").map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n >= 1 && n <= 80))];
   if (chosen.length < 2 || chosen.length > 10) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Picks", COLORS.red).setDescription("Pick between **2 and 10** unique numbers between 1–80.")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Picks", COLORS.red).setDescription("Pick between **2 and 10** unique numbers between 1–80.")], flags: MessageFlags.Ephemeral });
   }
 
   removeBalance(guildId, userId, bet);
@@ -1095,6 +1205,7 @@ async function cmdKeno(interaction, userId, guildId, bet, picks) {
     );
 
   await interaction.reply({ embeds: [embed] });
+  endGame(guildId, userId);
 }
 
 // ─── LIMBO ────────────────────────────────────────────────────────────────────
@@ -1111,14 +1222,14 @@ function generateLimboResult() {
 }
 
 async function cmdLimbo(interaction, userId, guildId, bet, target) {
+  if (await checkActiveGame(interaction, guildId, userId)) return;
   bet = parseInt(bet);
   target = parseFloat(parseFloat(target).toFixed(2));
-
   if (!await validateBet(interaction, guildId, userId, bet)) return;
   if (!target || isNaN(target) || target < 1.01 || target > 100) {
-    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Target", COLORS.red).setDescription("Target multiplier must be between **1.01× and 100×**.\n\nExample: `$limbo 10 2.5`")], flags: 64 });
+    return interaction.reply({ embeds: [baseEmbed("❌ Invalid Target", COLORS.red).setDescription("Target multiplier must be between **1.01× and 100×**.")], flags: MessageFlags.Ephemeral });
   }
-
+  startGame(guildId, userId, "Limbo");
   removeBalance(guildId, userId, bet);
 
   const result = generateLimboResult();
@@ -1205,6 +1316,7 @@ async function cmdLimbo(interaction, userId, guildId, bet, target) {
     if (frameIdx >= frames.length) {
       clearInterval(interval);
       await msg.edit({ embeds: [resultEmbed(finalResult, won)] }).catch(() => {});
+      endGame(guildId, userId);
       return;
     }
     await msg.edit({ embeds: [rollingEmbed(frames[frameIdx], spinIdx)] }).catch(() => {});
@@ -1215,4 +1327,5 @@ module.exports = {
   cmdSlots, cmdCoinflip, cmdRoulette, cmdBlackjack,
   cmdCrash, cmdMines, cmdTowers, cmdKeno, cmdLimbo,
   handleBlackjack, handleMines, handleTowers,
+  cmdUnfreeze,
 };
