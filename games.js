@@ -110,37 +110,38 @@ function clearActiveBonus(guildId, userId) {
   }
 }
 
-// Applies active bonus to a gross payout:
-// - deposit10 / deposit25: boost payout by 10% or 25%
-// - multiplier2x: double the payout
-// Returns { adjustedPayout, bonusMsg } — bonusMsg is empty string if no bonus
+// Applies active bonus to a gross payout — GAMES ONLY.
+// deposit10/deposit25 do NOT apply here — they only apply via /deposit command.
+// Only multiplier2x applies to game wins.
 function applyActiveBonusToWin(guildId, userId, grossPayout) {
   const bonus = getActiveBonus(guildId, userId);
   if (!bonus) return { adjustedPayout: grossPayout, bonusMsg: "" };
 
+  // Deposit bonuses are NOT for games — skip silently
+  if (bonus === "deposit10" || bonus === "deposit25") {
+    return { adjustedPayout: grossPayout, bonusMsg: "" };
+  }
+
   let adjusted = grossPayout;
   let msg = "";
 
-  if (bonus === "deposit10") {
-    const extra = Math.floor(grossPayout * 0.10);
-    adjusted = grossPayout + extra;
-    msg = `\n📈 *Deposit Boost +10% applied! (+${extra.toLocaleString()} ${R})*`;
-  } else if (bonus === "deposit25") {
-    const extra = Math.floor(grossPayout * 0.25);
-    adjusted = grossPayout + extra;
-    msg = `\n🚀 *Deposit Boost +25% applied! (+${extra.toLocaleString()} ${R})*`;
-  } else if (bonus === "multiplier2x") {
+  if (bonus === "multiplier2x") {
     adjusted = grossPayout * 2;
     msg = `\n⚡ *x2 Multiplier applied! (×2)*`;
+    clearActiveBonus(guildId, userId);
   }
 
-  clearActiveBonus(guildId, userId);
   return { adjustedPayout: adjusted, bonusMsg: msg };
 }
 
-// Applies cashback5 on a loss — refunds 5% of bet
+// Applies cashback5 on a loss — refunds 5% of bet.
+// deposit10/deposit25 are NOT consumed on losses — only /deposit uses them.
 function applyActiveBonusOnLoss(guildId, userId, bet) {
   const bonus = getActiveBonus(guildId, userId);
+  // Deposit bonuses don't apply to games at all — don't consume them
+  if (!bonus || bonus === "deposit10" || bonus === "deposit25" || bonus === "multiplier2x") {
+    return { cashback: 0, bonusMsg: "" };
+  }
   if (bonus !== "cashback5") return { cashback: 0, bonusMsg: "" };
   const cashback = Math.max(1, Math.floor(bet * 0.05));
   addBalance(guildId, userId, cashback);
