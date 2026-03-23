@@ -273,9 +273,10 @@ async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore) {
         .setDescription(`**${member.user.username}** joined via your affiliate link!\n\nYou'll earn **${AFF_PCT_DISPLAY}** of their wagers.`)] }).catch(() => {});
       member.user.send({ embeds: [baseEmbed("👋 Welcome!", 0x5865F2)
         .setDescription("You joined via an affiliate link! Use `/wheel` for a free spin to get started.")] }).catch(() => {});
-      break;
+      return true; // matched
     }
-  } catch (err) { console.error("Affiliate join error:", err); }
+    return false;
+  } catch (err) { console.error("Affiliate join error:", err); return false; }
 }
 
 function handleMemberLeave(member) {
@@ -453,9 +454,10 @@ async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore) {
       db[guildId][userId].prizePoolInviteUsed  = true;
       db[guildId][userId].prizePoolReferredBy  = referrerId;
       saveDB(db);
-      break;
+      return true; // matched
     }
-  } catch (err) { console.error("Prizepool join error:", err); }
+    return false;
+  } catch (err) { console.error("Prizepool join error:", err); return false; }
 }
 
 // Delete all bot-created invites for a specific event type
@@ -705,9 +707,10 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
       saveDB(db2);
       setGlobal("guessCode", cd);
       await updateCodePanel(client, member.guild);
-      break;
+      return true; // matched
     }
-  } catch (err) { console.error("Code join error:", err); }
+    return false;
+  } catch (err) { console.error("Code join error:", err); return false; }
 }
 
 async function cmdEndCode(interaction, client) {
