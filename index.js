@@ -29,6 +29,7 @@ const {
   cmdSetWithdrawChannel, cmdSetWithdrawMin,
   handleWithdrawButton,
   cmdDeposit,
+  cmdInvited, cmdInviter,
   cmdHelp,
   cmdAdminHelp,
 } = require("./features");
@@ -130,6 +131,12 @@ const commands = [
     .addStringOption(o => o.setName("asset_id").setDescription("Your Roblox gamepass Asset ID").setRequired(true)),
 
   new SlashCommandBuilder().setName("withdrawpanel").setDescription("Send the withdrawal info panel in this channel"),
+
+  new SlashCommandBuilder().setName("invited").setDescription("See who a user has invited")
+    .addUserOption(o => o.setName("user").setDescription("User to check (default: yourself)")),
+
+  new SlashCommandBuilder().setName("inviter").setDescription("See who invited a user")
+    .addUserOption(o => o.setName("user").setDescription("User to check (default: yourself)")),
 
   new SlashCommandBuilder().setName("help").setDescription("View all available commands and how to use them"),
 
@@ -236,6 +243,8 @@ async function handleSlash(interaction) {
   }
 
   switch (commandName) {
+    case "invited":     return cmdInvited(interaction, userId, guildId, interaction.options.getUser("user"));
+    case "inviter":     return cmdInviter(interaction, userId, guildId, interaction.options.getUser("user"));
     case "help":        return cmdHelp(interaction);
     case "givespins":   return cmdGiveSpins(interaction, guildId, interaction.options.getUser("user"), interaction.options.getInteger("amount"));
     case "unfreeze":    return cmdUnfreeze(interaction, userId, guildId);
@@ -385,9 +394,10 @@ client.on("guildMemberAdd", async (member) => {
     }
 
     // Affiliate, prize pool, guess code join handlers
-    const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore);
-    const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore);
-    const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore);
+    // Pass invitesAfter directly so they don't re-fetch (avoids race condition)
+    const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore, invitesAfter);
+    const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore, invitesAfter);
+    const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore, invitesAfter);
 
     // If invite didn't qualify for anything, DM the new member to let them know
     if (!wheelSpinGranted && !affMatched && !ppMatched && !codeMatched) {
