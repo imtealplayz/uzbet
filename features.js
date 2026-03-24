@@ -236,29 +236,27 @@ async function handleAffiliateButton(interaction, userId, guildId) {
   }
 }
 
-async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore) {
+async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore, invitesAfter) {
   try {
     const guildId = member.guild.id;
     const userId  = member.user.id;
-    if (getAccountAge(userId) < 5) return;
+    if (getAccountAge(userId) < 5) return false;
 
     const db = loadDB();
-    if ((db.leftMembers || []).includes(userId)) return;
+    if ((db.leftMembers || []).includes(userId)) return false;
 
-    const invitesAfter = await member.guild.invites.fetch().catch(() => null);
-    if (!invitesAfter) return;
+    if (!invitesAfter) invitesAfter = await member.guild.invites.fetch().catch(() => null);
+    if (!invitesAfter) return false;
 
     const affiliateInvites = db.affiliateInvites || {};
 
-    // Find which invite was used by comparing use counts
     for (const [code, referrerId] of Object.entries(affiliateInvites)) {
       const after  = invitesAfter.get(code);
       const before = cachedInvitesBefore?.get(code);
-      const usedNow = after && before && after.uses > before.uses;
-      const newInvite = after && !before; // invite didn't exist before = brand new use
+      const usedNow  = after && before && after.uses > before.uses;
+      const newInvite = after && !before;
       if (!usedNow && !newInvite) continue;
 
-      // Make sure this invite isn't claimed by another event
       const ownership = getInviteOwnership(code);
       if (ownership && ownership !== "affiliate") continue;
 
@@ -273,7 +271,7 @@ async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore) {
         .setDescription(`**${member.user.username}** joined via your affiliate link!\n\nYou'll earn **${AFF_PCT_DISPLAY}** of their wagers.`)] }).catch(() => {});
       member.user.send({ embeds: [baseEmbed("👋 Welcome!", 0x5865F2)
         .setDescription("You joined via an affiliate link! Use `/wheel` for a free spin to get started.")] }).catch(() => {});
-      return true; // matched
+      return true;
     }
     return false;
   } catch (err) { console.error("Affiliate join error:", err); return false; }
@@ -424,20 +422,19 @@ async function handlePrizepoolButton(interaction, userId, guildId, client) {
   }
 }
 
-async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore) {
+async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore, invitesAfter) {
   try {
     const guildId = member.guild.id;
     const userId  = member.user.id;
-    if (getAccountAge(userId) < 5) return;
 
     const db = loadDB();
-    if ((db.leftMembers || []).includes(userId)) return;
+    if ((db.leftMembers || []).includes(userId)) return false;
 
     const pool = getPrizePool();
-    if (!pool.active || pool.remaining <= 0) return;
+    if (!pool.active || pool.remaining <= 0) return false;
 
-    const invitesAfter = await member.guild.invites.fetch().catch(() => null);
-    if (!invitesAfter) return;
+    if (!invitesAfter) invitesAfter = await member.guild.invites.fetch().catch(() => null);
+    if (!invitesAfter) return false;
 
     const ppInvites = db.prizePoolInvites || {};
 
@@ -449,12 +446,12 @@ async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore) {
       const ownership = getInviteOwnership(code);
       if (ownership && ownership !== "prizepool") continue;
 
-      // Just mark who referred them — reward is given when they verify
       ensureUser(db, guildId, userId);
       db[guildId][userId].prizePoolInviteUsed  = true;
       db[guildId][userId].prizePoolReferredBy  = referrerId;
       saveDB(db);
-      return true; // matched
+      console.log(`✅ [PrizePool] ${member.user.username} matched prizepool invite from ${referrerId}`);
+      return true;
     }
     return false;
   } catch (err) { console.error("Prizepool join error:", err); return false; }
@@ -665,20 +662,19 @@ async function cmdGuess(interaction, userId, guildId) {
   }
 }
 
-async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
+async function handleCodeMemberJoin(member, client, cachedInvitesBefore, invitesAfter) {
   try {
     const cd = getGlobal("guessCode");
-    if (!cd?.active) return;
+    if (!cd?.active) return false;
 
     const userId  = member.user.id;
     const guildId = member.guild.id;
-    if (getAccountAge(userId) < 5) return;
 
     const db = loadDB();
-    if ((db.leftMembers || []).includes(userId)) return;
+    if ((db.leftMembers || []).includes(userId)) return false;
 
-    const invitesAfter = await member.guild.invites.fetch().catch(() => null);
-    if (!invitesAfter) return;
+    if (!invitesAfter) invitesAfter = await member.guild.invites.fetch().catch(() => null);
+    if (!invitesAfter) return false;
 
     const codeInvites = db.guessCodeInvites || {};
 
@@ -687,7 +683,6 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
       const before = cachedInvitesBefore?.get(code);
       if (!(after && before && after.uses > before.uses) && !(after && !before)) continue;
 
-      // Isolation — must be guesscode invite
       const ownership = getInviteOwnership(code);
       if (ownership && ownership !== "guesscode") continue;
 
@@ -699,7 +694,6 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
           cd.revealed.sort((a, b) => a - b);
         }
       }
-      // Mark new member so verify handler knows which system they came from
       const db2 = loadDB();
       ensureUser(db2, guildId, userId);
       const inviterId = db.guessCodeInvites?.[code];
@@ -707,7 +701,8 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore) {
       saveDB(db2);
       setGlobal("guessCode", cd);
       await updateCodePanel(client, member.guild);
-      return true; // matched
+      console.log(`✅ [GuessCode] ${member.user.username} matched guesscode invite from ${inviterId}`);
+      return true;
     }
     return false;
   } catch (err) { console.error("Code join error:", err); return false; }
@@ -1112,6 +1107,85 @@ async function cmdAdminHelp(interaction) {
       .setTimestamp().setFooter({ text: "🎰 Casino Bot • Admin" })],
     flags: MessageFlags.Ephemeral
   });
+}
+
+// ─── INVITE TRACKING COMMANDS ─────────────────────────────────────────────────
+
+async function cmdInvited(interaction, userId, guildId, targetUser) {
+  const uid  = targetUser ? targetUser.id : userId;
+  const name = targetUser ? targetUser.username : interaction.user.username;
+  const db   = loadDB();
+  const guildData = db[guildId] || {};
+
+  // Find all users referred by this person across all systems
+  const referred = [];
+  for (const [uid2, udata] of Object.entries(guildData)) {
+    if (typeof udata !== "object") continue;
+    const systems = [];
+    if (udata.referredBy          === uid) systems.push("Affiliate");
+    if (udata.prizePoolReferredBy === uid) systems.push("Prize Pool");
+    if (udata.guessCodeReferredBy === uid) systems.push("Guess Code");
+    if (systems.length > 0) referred.push({ uid: uid2, systems });
+  }
+
+  const u = guildData[uid] || {};
+  const affReferrals = u.affiliateReferrals || 0;
+  const ppInvites    = u.prizePoolInvites   || 0;
+  const extraSpins   = u.wheelExtraSpins    || 0;
+
+  const lines = referred.length > 0
+    ? referred.map(r => `<@${r.uid}> — *${r.systems.join(", ")}*`).join("\n")
+    : "_No recorded referrals yet_";
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle(`📨 ${name}'s Invites`)
+    .addFields(
+      { name: "🤝 Affiliate Referrals", value: `${affReferrals}`, inline: true },
+      { name: "🏆 Prize Pool Invites",  value: `${ppInvites}`,    inline: true },
+      { name: "🎡 Wheel Bonus Spins",   value: `${extraSpins}`,   inline: true },
+      { name: `👥 People Referred (${referred.length})`, value: lines.slice(0, 1024), inline: false }
+    )
+    .setTimestamp()
+    .setFooter({ text: "🎰 Casino Bot • Invite Tracker" });
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function cmdInviter(interaction, userId, guildId, targetUser) {
+  const uid  = targetUser ? targetUser.id : userId;
+  const name = targetUser ? targetUser.username : interaction.user.username;
+  const db   = loadDB();
+  const u    = db[guildId]?.[uid] || {};
+
+  const affRef  = u.referredBy          || null;
+  const ppRef   = u.prizePoolReferredBy || null;
+  const codeRef = u.guessCodeReferredBy || null;
+
+  if (!affRef && !ppRef && !codeRef) {
+    return interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xE74C3C)
+        .setTitle(`🔍 ${name}'s Inviter`)
+        .setDescription("No inviter found — this user didn't join via any tracked invite link.")
+        .setTimestamp()
+        .setFooter({ text: "🎰 Casino Bot • Invite Tracker" })]
+    });
+  }
+
+  const fields = [];
+  if (affRef)  fields.push({ name: "🤝 Affiliate Inviter",  value: `<@${affRef}>`,  inline: true });
+  if (ppRef)   fields.push({ name: "🏆 Prize Pool Inviter", value: `<@${ppRef}>`,   inline: true });
+  if (codeRef) fields.push({ name: "🔐 Guess Code Inviter", value: `<@${codeRef}>`, inline: true });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle(`🔍 ${name}'s Inviter`)
+    .addFields(...fields)
+    .setTimestamp()
+    .setFooter({ text: "🎰 Casino Bot • Invite Tracker" });
+
+  await interaction.reply({ embeds: [embed] });
 }
 
 // ─── DEPOSIT (admin/owner) ────────────────────────────────────────────────────
@@ -1786,5 +1860,6 @@ module.exports = {
   cmdSetWithdrawChannel, cmdSetWithdrawMin,
   handleWithdrawButton,
   cmdDeposit,
+  cmdInvited, cmdInviter,
   cmdAdminHelp,
 };
