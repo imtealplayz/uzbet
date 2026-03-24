@@ -29,6 +29,7 @@ const {
   cmdSetWithdrawChannel, cmdSetWithdrawMin,
   handleWithdrawButton,
   cmdDeposit,
+  cmdMyLinks,
   cmdInvited, cmdInviter,
   cmdHelp,
   cmdAdminHelp,
@@ -131,6 +132,8 @@ const commands = [
     .addStringOption(o => o.setName("asset_id").setDescription("Your Roblox gamepass Asset ID").setRequired(true)),
 
   new SlashCommandBuilder().setName("withdrawpanel").setDescription("Send the withdrawal info panel in this channel"),
+
+  new SlashCommandBuilder().setName("mylinks").setDescription("View all your personal invite links in one place"),
 
   new SlashCommandBuilder().setName("invited").setDescription("See who a user has invited")
     .addUserOption(o => o.setName("user").setDescription("User to check (default: yourself)")),
@@ -243,6 +246,7 @@ async function handleSlash(interaction) {
   }
 
   switch (commandName) {
+    case "mylinks":     return cmdMyLinks(interaction, userId, guildId);
     case "invited":     return cmdInvited(interaction, userId, guildId, interaction.options.getUser("user"));
     case "inviter":     return cmdInviter(interaction, userId, guildId, interaction.options.getUser("user"));
     case "help":        return cmdHelp(interaction);
