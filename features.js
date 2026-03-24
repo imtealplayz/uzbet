@@ -240,7 +240,6 @@ async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore, in
   try {
     const guildId = member.guild.id;
     const userId  = member.user.id;
-    if (getAccountAge(userId) < 5) return false;
 
     const db = loadDB();
     if ((db.leftMembers || []).includes(userId)) return false;
@@ -832,9 +831,9 @@ async function cmdVerifyPanel(interaction) {
     .setTitle("✅ Verify Yourself")
     .setDescription(
       "Welcome! Click the button below to verify your account and gain access to the server.\n\n" +
-      "⚠️ **Requirements:**\n" +
-      "• Your Discord account must be **5+ months old**\n" +
-      "• You must not be a previously banned or rejoining member\n\n" +
+      "⚠️ **Note:**\n" +
+      "• Previously banned or rejoining members cannot self-verify\n" +
+      "• Invite rewards (affiliate, prize pool) only apply to accounts **5+ months old**\n\n" +
       "Click **Verify** to get started!"
     )
     .setTimestamp()
@@ -856,27 +855,12 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
 
   const db = loadDB();
 
-  // Rejoin check
+  // Rejoin check — still blocked regardless of age
   const leftMembers = db.leftMembers || [];
   if (leftMembers.includes(userId)) {
     return interaction.editReply({
       embeds: [baseEmbed("❌ Cannot Verify", 0xE74C3C)
         .setDescription("You appear to be a returning member. Please contact an admin for manual verification.")]
-    });
-  }
-
-  // Account age check (5+ months)
-  const ageMths = getAccountAge(userId);
-  if (ageMths < 5) {
-    const createdAt = new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
-    const needed    = new Date(createdAt.getTime() + 5 * 30 * 24 * 60 * 60 * 1000);
-    return interaction.editReply({
-      embeds: [baseEmbed("❌ Account Too New", 0xE74C3C)
-        .setDescription(
-          `Your Discord account is only **${ageMths.toFixed(1)} months** old.\n\n` +
-          `You need an account that is at least **5 months old** to verify.\n\n` +
-          `Try again after <t:${Math.floor(needed.getTime() / 1000)}:D>.`
-        )]
     });
   }
 
@@ -897,7 +881,7 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
     });
   }
 
-  // Assign role
+  // Assign role — everyone can get verified regardless of account age
   try {
     await member.roles.add(roleId, "Self-verified via bot");
   } catch (err) {
@@ -905,106 +889,119 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
     return interaction.editReply({ content: `❌ Failed to assign role. Error: \`${err?.message || err}\`` });
   }
 
-  // ── Determine invite source and send appropriate invite link ──
+  // ── Invite source handling ──
+  // Inviters only get credit if the newly verified user is 5+ months old
+  const ageMths      = getAccountAge(userId);
+  const isEligible   = ageMths >= 5;
+
   ensureUser(db, guildId, userId);
   const u = db[guildId][userId];
   let inviteSourceMsg = "";
-  let inviteForUser   = null; // the invite URL to send back to the newly verified user
+  let inviteForUser   = null;
+
+  const ch = interaction.channel || await client.channels.fetch(interaction.channelId).catch(() => null);
 
   // 1. Affiliate referral
   if (u.referredBy) {
     const referrer = await client.users.fetch(u.referredBy).catch(() => null);
-    inviteSourceMsg = referrer
-      ? `\n\n🤝 You joined via **${referrer.username}'s** affiliate link.`
-      : "\n\n🤝 You joined via an affiliate link.";
 
-    // Give the new user their own affiliate link to share
-    try {
-      const inv = await interaction.channel.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `Affiliate:${userId}` });
-      const db2 = loadDB();
-      if (!db2.affiliateInvites) db2.affiliateInvites = {};
-      db2.affiliateInvites[inv.code]         = userId;
-      db2[guildId][userId].affiliateInviteUrl  = inv.url;
-      db2[guildId][userId].affiliateInviteCode = inv.code;
-      saveDB(db2);
-      inviteForUser = inv.url;
-    } catch { /* invite creation failed — not critical */ }
-  }
+    if (isEligible) {
+      inviteSourceMsg = referrer
+        ? `\n\n🤝 You joined via **${referrer.username}'s** affiliate link.`
+        : "\n\n🤝 You joined via an affiliate link.";
 
-  // 2. Prize pool referral — credit the inviter NOW (on verify, not on join)
-  else if (u.prizePoolInviteUsed) {
-    const ppReferrerId = u.prizePoolReferredBy || null;
-    const ref = ppReferrerId ? await client.users.fetch(ppReferrerId).catch(() => null) : null;
-    inviteSourceMsg = ref
-      ? `\n\n🏆 You joined via **${ref.username}'s** prize pool link.`
-      : "\n\n🏆 You joined via a prize pool link.";
-
-    // Credit the referrer now that the user is verified
-    if (ppReferrerId) {
-      const pool = getPrizePool();
-      if (pool.active && pool.remaining > 0) {
-        const db3 = loadDB();
-        ensureUser(db3, guildId, ppReferrerId);
-        const reward    = Math.min(PP_REWARD, pool.remaining);
-        pool.remaining -= reward;
-        pool.active     = pool.remaining > 0;
-        db3[guildId][ppReferrerId].balance         = (db3[guildId][ppReferrerId].balance || 0) + reward;
-        db3[guildId][ppReferrerId].prizePoolEarned  = (db3[guildId][ppReferrerId].prizePoolEarned || 0) + reward;
-        db3[guildId][ppReferrerId].prizePoolInvites = (db3[guildId][ppReferrerId].prizePoolInvites || 0) + 1;
-        setGlobal("prizePool", pool);
-        saveDB(db3);
-
-        // Update the panel
-        await updatePrizepoolPanel(client, interaction.guild);
-
-        // If pool empty, clean up invites
-        if (pool.remaining <= 0) await cleanupInvites(interaction.guild, "prizepool").catch(() => {});
-
-        // DM the referrer
-        if (ref) ref.send({ embeds: [baseEmbed("🏆 Prize Pool Reward!", 0xF4C542)
-          .setDescription(`**${interaction.user.username}** joined via your prize pool link and just verified!\n\n**+${reward} ${R}** added to your balance!`)] }).catch(() => {});
-      }
-    }
-
-    // Give the new verified user their own prize pool invite link
-    const pool2 = getPrizePool();
-    if (pool2.active && pool2.remaining > 0) {
+      // Give the new user their own affiliate link
       try {
-        const ch = interaction.channel || await client.channels.fetch(interaction.channelId).catch(() => null);
         if (ch) {
-          const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `PrizePool:${userId}` });
+          const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `Affiliate:${userId}` });
           const db2 = loadDB();
-          if (!db2.prizePoolInvites) db2.prizePoolInvites = {};
+          if (!db2.affiliateInvites) db2.affiliateInvites = {};
           ensureUser(db2, guildId, userId);
-          db2.prizePoolInvites[inv.code]           = userId;
-          db2[guildId][userId].prizePoolInviteUrl   = inv.url;
-          db2[guildId][userId].prizePoolInviteCode  = inv.code;
+          db2.affiliateInvites[inv.code]           = userId;
+          db2[guildId][userId].affiliateInviteUrl  = inv.url;
+          db2[guildId][userId].affiliateInviteCode = inv.code;
           saveDB(db2);
           inviteForUser = inv.url;
         }
       } catch { /* not critical */ }
+    } else {
+      inviteSourceMsg = `\n\n⚠️ You joined via an affiliate link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
     }
   }
 
-  // 3. Guess-the-code referral
+  // 2. Prize pool referral — credit inviter only if eligible
+  else if (u.prizePoolInviteUsed) {
+    const ppReferrerId = u.prizePoolReferredBy || null;
+    const ref = ppReferrerId ? await client.users.fetch(ppReferrerId).catch(() => null) : null;
+
+    if (isEligible) {
+      inviteSourceMsg = ref
+        ? `\n\n🏆 You joined via **${ref.username}'s** prize pool link.`
+        : "\n\n🏆 You joined via a prize pool link.";
+
+      if (ppReferrerId) {
+        const pool = getPrizePool();
+        if (pool.active && pool.remaining > 0) {
+          const db3 = loadDB();
+          ensureUser(db3, guildId, ppReferrerId);
+          const reward    = Math.min(PP_REWARD, pool.remaining);
+          pool.remaining -= reward;
+          pool.active     = pool.remaining > 0;
+          db3[guildId][ppReferrerId].balance         = (db3[guildId][ppReferrerId].balance || 0) + reward;
+          db3[guildId][ppReferrerId].prizePoolEarned  = (db3[guildId][ppReferrerId].prizePoolEarned || 0) + reward;
+          db3[guildId][ppReferrerId].prizePoolInvites = (db3[guildId][ppReferrerId].prizePoolInvites || 0) + 1;
+          setGlobal("prizePool", pool);
+          saveDB(db3);
+          await updatePrizepoolPanel(client, interaction.guild);
+          if (pool.remaining <= 0) await cleanupInvites(interaction.guild, "prizepool").catch(() => {});
+          if (ref) ref.send({ embeds: [baseEmbed("🏆 Prize Pool Reward!", 0xF4C542)
+            .setDescription(`**${interaction.user.username}** verified via your prize pool link!\n\n**+${reward} ${R}** added to your balance!`)] }).catch(() => {});
+        }
+      }
+
+      // Give the new user their own prize pool invite link
+      const pool2 = getPrizePool();
+      if (pool2.active && pool2.remaining > 0) {
+        try {
+          if (ch) {
+            const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `PrizePool:${userId}` });
+            const db2 = loadDB();
+            if (!db2.prizePoolInvites) db2.prizePoolInvites = {};
+            ensureUser(db2, guildId, userId);
+            db2.prizePoolInvites[inv.code]           = userId;
+            db2[guildId][userId].prizePoolInviteUrl   = inv.url;
+            db2[guildId][userId].prizePoolInviteCode  = inv.code;
+            saveDB(db2);
+            inviteForUser = inv.url;
+          }
+        } catch { /* not critical */ }
+      }
+    } else {
+      inviteSourceMsg = `\n\n⚠️ You joined via a prize pool link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
+    }
+  }
+
+  // 3. Guess-the-code referral — credit regardless (just reveals a letter, no coins involved)
   else if (u.guessCodeReferredBy) {
     const ref = await client.users.fetch(u.guessCodeReferredBy).catch(() => null);
     inviteSourceMsg = ref
       ? `\n\n🔐 You joined via **${ref.username}'s** guess-the-code link.`
       : "\n\n🔐 You joined via a guess-the-code link.";
 
-    // Give the new user their own guess-the-code invite link
     const cd = getGlobal("guessCode");
     if (cd?.active) {
       try {
-        const inv = await interaction.channel.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `GuessCode:${userId}` });
-        const db2 = loadDB();
-        if (!db2.guessCodeInvites) db2.guessCodeInvites = {};
-        db2.guessCodeInvites[inv.code]           = userId;
-        db2[guildId][userId].guessCodeInviteUrl   = inv.url;
-        db2[guildId][userId].guessCodeInviteCode  = inv.code;
-        saveDB(db2);
-        inviteForUser = inv.url;
+        if (ch) {
+          const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, unique: true, reason: `GuessCode:${userId}` });
+          const db2 = loadDB();
+          if (!db2.guessCodeInvites) db2.guessCodeInvites = {};
+          ensureUser(db2, guildId, userId);
+          db2.guessCodeInvites[inv.code]           = userId;
+          db2[guildId][userId].guessCodeInviteUrl   = inv.url;
+          db2[guildId][userId].guessCodeInviteCode  = inv.code;
+          saveDB(db2);
+          inviteForUser = inv.url;
+        }
       } catch { /* not critical */ }
     }
   }
@@ -1067,6 +1064,9 @@ async function cmdHelp(interaction) {
           "`/affiliate` — Earn 0.5% of your referrals' bets forever\n" +
           "`/prizepool` — Invite friends to earn from the prize pool\n" +
           "`/guess <code>` — Crack the 8-char code to win the prize\n" +
+          "`/mylinks` — See all your personal invite links in one place\n" +
+          "`/invited [@user]` — See who a user has invited\n" +
+          "`/inviter [@user]` — See who invited a user\n" +
           "`/withdraw <amount> <asset_id>` — Cash out to real Robux\n" +
           "`/withdrawpanel` — How to withdraw guide\n" +
           "`/unfreeze` — Clear a frozen game (no refund)",
@@ -1107,6 +1107,65 @@ async function cmdAdminHelp(interaction) {
       .setTimestamp().setFooter({ text: "🎰 Casino Bot • Admin" })],
     flags: MessageFlags.Ephemeral
   });
+}
+
+// ─── MY LINKS ─────────────────────────────────────────────────────────────────
+
+async function cmdMyLinks(interaction, userId, guildId) {
+  const db = loadDB();
+  ensureUser(db, guildId, userId);
+  const u = db[guildId][userId];
+
+  const affUrl      = u.affiliateInviteUrl   || null;
+  const ppUrl       = u.prizePoolInviteUrl   || null;
+  const codeUrl     = u.guessCodeInviteUrl   || null;
+  const wheelUrl    = u.wheelInviteUrl       || null;
+
+  const pool = getPrizePool();
+  const cd   = getGlobal("guessCode");
+
+  const lines = [];
+
+  if (affUrl) {
+    lines.push(`🤝 **Affiliate Link**\n> Earn 0.5% of every bet your referrals place\n> ${affUrl}`);
+  } else {
+    lines.push(`🤝 **Affiliate Link** — Use the affiliate panel to generate yours`);
+  }
+
+  if (pool?.active) {
+    if (ppUrl) {
+      lines.push(`🏆 **Prize Pool Link**\n> Earn ${PP_REWARD} ${R} per valid invite\n> ${ppUrl}`);
+    } else {
+      lines.push(`🏆 **Prize Pool Link** — Use the prize pool panel to generate yours`);
+    }
+  } else {
+    lines.push(`🏆 **Prize Pool** — No active prize pool right now`);
+  }
+
+  if (cd?.active) {
+    if (codeUrl) {
+      lines.push(`🔐 **Guess the Code Link**\n> Each valid invite reveals 1 more character\n> ${codeUrl}`);
+    } else {
+      lines.push(`🔐 **Guess the Code Link** — Use the guess code panel to generate yours`);
+    }
+  } else {
+    lines.push(`🔐 **Guess the Code** — No active code event right now`);
+  }
+
+  if (wheelUrl) {
+    lines.push(`🎡 **Wheel Invite Link**\n> Each person who joins earns you +1 free wheel spin\n> ${wheelUrl}`);
+  } else {
+    lines.push(`🎡 **Wheel Invite Link** — Spin \`/wheel\` to generate yours`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle("🔗 Your Invite Links")
+    .setDescription(lines.join("\n\n"))
+    .setTimestamp()
+    .setFooter({ text: "🎰 Casino Bot • My Links" });
+
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 // ─── INVITE TRACKING COMMANDS ─────────────────────────────────────────────────
@@ -1860,6 +1919,7 @@ module.exports = {
   cmdSetWithdrawChannel, cmdSetWithdrawMin,
   handleWithdrawButton,
   cmdDeposit,
+  cmdMyLinks,
   cmdInvited, cmdInviter,
   cmdAdminHelp,
 };
