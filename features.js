@@ -1949,7 +1949,40 @@ async function handleWithdrawButton(interaction, client) {
   }
 }
 
-// ─── EXPORTS ──────────────────────────────────────────────────────────────────
+// ─── RESET STATS ─────────────────────────────────────────────────────────────
+
+async function cmdResetStats(interaction, guildId, targetUser) {
+  if (!isOwner(interaction)) return interaction.reply({ content: "❌ No permission.", flags: MessageFlags.Ephemeral });
+  if (!targetUser) return interaction.reply({ content: "❌ Provide a user.", flags: MessageFlags.Ephemeral });
+
+  const db = loadDB();
+  ensureUser(db, guildId, targetUser.id);
+  const u = db[guildId][targetUser.id];
+
+  // Reset stats and wagering fields only — keep balance and invite data intact
+  u.stats             = {};
+  u.totalWagered      = 0;
+  u.wageredSinceTip   = 0;
+  u.wageredSinceDaily = 0;
+  u.rakebackPending   = 0;
+  u.lastRakebackClaim = 0;
+  u.totalDailyClaimed = 0;
+
+  db[guildId][targetUser.id] = u;
+  saveDB(db);
+
+  await interaction.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2ECC71)
+      .setTitle("✅ Stats Reset")
+      .setDescription(`Stats for <@${targetUser.id}> have been reset.\n\nBalance and invite data were kept intact.`)
+      .setTimestamp()
+      .setFooter({ text: "🎰 Casino Bot • Admin" })],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+
 
 module.exports = {
   checkDailyWagerReq,
@@ -1971,6 +2004,7 @@ module.exports = {
   cmdSetDepositLogChannel, cmdSetWithdrawLogChannel,
   handleWithdrawButton,
   cmdDeposit,
+  cmdResetStats,
   cmdMyLinks,
   cmdInvited, cmdInviter,
   cmdAdminHelp,
