@@ -30,6 +30,7 @@ const {
   cmdSetDepositLogChannel, cmdSetWithdrawLogChannel,
   handleWithdrawButton,
   cmdDeposit,
+  cmdResetStats,
   cmdMyLinks,
   cmdInvited, cmdInviter,
   cmdHelp,
@@ -120,6 +121,10 @@ const commands = [
   new SlashCommandBuilder().setName("rakeback").setDescription("Check and claim your rakeback rewards"),
 
   new SlashCommandBuilder().setName("wheel").setDescription("Spin the wheel of fortune! (Once every 24h, or use an invite spin)"),
+
+  new SlashCommandBuilder().setName("resetstats").setDescription("Owner: Reset a user's stats")
+    .setDefaultMemberPermissions(0)
+    .addUserOption(o => o.setName("user").setDescription("User to reset").setRequired(true)),
 
   new SlashCommandBuilder().setName("givespins").setDescription("Owner: Give wheel spins to a user")
     .setDefaultMemberPermissions(0)
@@ -255,6 +260,7 @@ async function handleSlash(interaction) {
     case "invited":     return cmdInvited(interaction, userId, guildId, interaction.options.getUser("user"));
     case "inviter":     return cmdInviter(interaction, userId, guildId, interaction.options.getUser("user"));
     case "help":        return cmdHelp(interaction);
+    case "resetstats":  return cmdResetStats(interaction, guildId, interaction.options.getUser("user"));
     case "givespins":   return cmdGiveSpins(interaction, guildId, interaction.options.getUser("user"), interaction.options.getInteger("amount"));
     case "unfreeze":    return cmdUnfreeze(interaction, userId, guildId);
     case "withdraw":    return cmdWithdraw(interaction, userId, guildId, interaction.client);
@@ -362,54 +368,88 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("guildMemberAdd", async (member) => {
   try {
-    const guildId = member.guild.id;
+    const guildId  = member.guild.id;
+    const userId   = member.user.id;
     const cachedBefore = inviteCache.get(guildId) || new Map();
 
-    // Single invite fetch — shared with all handlers to avoid race conditions
+    // Fetch current invites
     const invitesAfter = await member.guild.invites.fetch().catch(() => null);
     if (invitesAfter) inviteCache.set(guildId, invitesAfter);
 
-    console.log(`👋 [Join] ${member.user.username} (${member.user.id}) joined guild ${guildId}`);
-    console.log(`📋 [Join] invitesAfter: ${invitesAfter?.size ?? "null"} | cachedBefore: ${cachedBefore.size}`);
+    console.log(`👋 [Join] ${member.user.username} (${userId}) | before:${cachedBefore.size} after:${invitesAfter?.size ?? "null"}`);
 
-    // ── Figure out which invite was used ──────────────────────────────────────
-    // Find the one invite whose use count increased
+    // ── Determine which invite code was used ──────────────────────────────────
+    // Strategy: find which code increased in use count vs our cache.
+    // If cachedBefore is empty (bot just restarted), fall back to DB lookup.
     let usedInviteCode = null;
+
     if (invitesAfter) {
+      // Primary: compare use counts
       for (const [code, invite] of invitesAfter) {
         const before = cachedBefore.get(code);
         if (before && invite.uses > before.uses) {
           usedInviteCode = code;
-          console.log(`🔗 [Join] Used invite code: ${code} (uses: ${before.uses} → ${invite.uses})`);
+          console.log(`🔗 [Join] Code detected via use count: ${code} (${before.uses}→${invite.uses})`);
           break;
         }
-        // New invite not in cache before
-        if (!before && invite.uses > 0) {
-          usedInviteCode = code;
-          console.log(`🔗 [Join] Used new invite code: ${code} (uses: ${invite.uses})`);
-          break;
+      }
+
+      // Fallback: if cache was empty (bot restart) or no match found,
+      // check all our stored invite codes against what's in invitesAfter with uses > 0
+      if (!usedInviteCode) {
+        console.log(`⚠️ [Join] No use-count match — trying DB fallback (cache may be stale from restart)`);
+        const db = loadDB();
+        const allStoredCodes = new Set([
+          ...Object.keys(db.affiliateInvites  || {}),
+          ...Object.keys(db.prizePoolInvites  || {}),
+          ...Object.keys(db.guessCodeInvites  || {}),
+          // wheel invite codes stored per user
+          ...Object.values(db[guildId] || {})
+            .filter(u => typeof u === "object" && u.wheelInviteCode)
+            .map(u => u.wheelInviteCode),
+        ]);
+
+        // Among all our stored codes, find the one that exists AND has uses > 0
+        // and whose uses increased vs cache (or cache didn't have it)
+        for (const code of allStoredCodes) {
+          const invite = invitesAfter.get(code);
+          if (!invite) continue; // invite deleted or expired
+          const before = cachedBefore.get(code);
+          // If not in cache at all, check if it has uses (means it was used)
+          if (!before && invite.uses > 0) {
+            usedInviteCode = code;
+            console.log(`🔗 [Join] Code detected via DB fallback (no cache): ${code} uses=${invite.uses}`);
+            break;
+          }
+          // If in cache but same uses — might still be our code if cache is 1 join behind
+          if (before && invite.uses >= before.uses && invite.uses > 0) {
+            usedInviteCode = code;
+            console.log(`🔗 [Join] Code detected via DB fallback (cache match): ${code} uses=${invite.uses}`);
+            break;
+          }
         }
       }
     }
 
     if (!usedInviteCode) {
-      console.log(`⚠️ [Join] Could not determine used invite code for ${member.user.username}`);
+      console.log(`⚠️ [Join] Could not detect invite code for ${member.user.username}`);
+    } else {
+      console.log(`✅ [Join] Using invite code: ${usedInviteCode}`);
     }
 
     // ── Wheel spin tracking ───────────────────────────────────────────────────
     let wheelSpinGranted = false;
     if (usedInviteCode) {
-      const data      = loadDB();
-      const guildData = data[guildId] || {};
+      const db        = loadDB();
+      const guildData = db[guildId] || {};
       for (const [uid, udata] of Object.entries(guildData)) {
         if (typeof udata !== "object") continue;
         const userWheelCode = udata.wheelInviteCode || udata.wheelInviteUrl?.split("/").pop() || null;
         if (!userWheelCode || userWheelCode !== usedInviteCode) continue;
-
-        console.log(`✅ [WheelInvite] Match! Granting spin to ${uid}`);
+        console.log(`🎡 [WheelInvite] Granting spin to ${uid}`);
         await grantWheelSpin(guildId, uid);
         wheelSpinGranted = true;
-        const inviter = await member.client.users.fetch(uid).catch(() => null);
+        const inviter = await client.users.fetch(uid).catch(() => null);
         if (inviter) inviter.send({ embeds: [new (require("discord.js").EmbedBuilder)()
           .setColor(0x2ECC71).setTitle("🎡 Bonus Spin!")
           .setDescription(`**${member.user.username}** joined using your invite!\n\nYou've been awarded **+1 wheel spin**. Use \`/wheel\` to spin!`)
@@ -418,26 +458,19 @@ client.on("guildMemberAdd", async (member) => {
       }
     }
 
-    // ── Affiliate, prize pool, guess code handlers ────────────────────────────
-    // Pass invitesAfter AND usedInviteCode so handlers don't re-fetch
+    // ── Affiliate / prizepool / guesscode ─────────────────────────────────────
     const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
     const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
     const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
 
-    console.log(`📊 [Join] Results — wheel:${wheelSpinGranted} aff:${affMatched} pp:${ppMatched} code:${codeMatched}`);
+    console.log(`📊 [Join] wheel:${wheelSpinGranted} aff:${affMatched} pp:${ppMatched} code:${codeMatched}`);
 
-    // ── DM if invite didn't qualify for anything ──────────────────────────────
+    // ── No match DM ──────────────────────────────────────────────────────────
     if (!wheelSpinGranted && !affMatched && !ppMatched && !codeMatched) {
       member.user.send({ embeds: [new (require("discord.js").EmbedBuilder)()
-        .setColor(0x5865F2)
-        .setTitle("👋 Welcome!")
-        .setDescription(
-          `Welcome to the server!\n\n` +
-          `Your invite link didn't qualify for any active reward programs.\n\n` +
-          `Use \`/wheel\` for a free daily spin to get started! 🎡`
-        )
-        .setTimestamp()
-        .setFooter({ text: "🎰 Casino Bot" })]
+        .setColor(0x5865F2).setTitle("👋 Welcome!")
+        .setDescription(`Welcome to the server!\n\nYour invite link didn't qualify for any active reward programs.\n\nUse \`/wheel\` for a free daily spin to get started! 🎡`)
+        .setTimestamp().setFooter({ text: "🎰 Casino Bot" })]
       }).catch(() => {});
     }
 
