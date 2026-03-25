@@ -27,8 +27,10 @@ const {
   cmdSetWagerRole, cmdViewWagerRoles,
   cmdWithdraw, cmdWithdrawPanel,
   cmdSetWithdrawChannel, cmdSetWithdrawMin,
+  cmdSetDepositLogChannel, cmdSetWithdrawLogChannel,
   handleWithdrawButton,
   cmdDeposit,
+  cmdMyLinks,
   cmdInvited, cmdInviter,
   cmdHelp,
   cmdAdminHelp,
@@ -132,6 +134,8 @@ const commands = [
 
   new SlashCommandBuilder().setName("withdrawpanel").setDescription("Send the withdrawal info panel in this channel"),
 
+  new SlashCommandBuilder().setName("mylinks").setDescription("View all your personal invite links in one place"),
+
   new SlashCommandBuilder().setName("invited").setDescription("See who a user has invited")
     .addUserOption(o => o.setName("user").setDescription("User to check (default: yourself)")),
 
@@ -187,7 +191,11 @@ const commands = [
     .addSubcommand(s => s.setName("setwithdrawchannel").setDescription("Set the channel where withdrawal requests are sent")
       .addChannelOption(o => o.setName("channel").setDescription("Admin channel for withdrawal requests").setRequired(true)))
     .addSubcommand(s => s.setName("setwithdrawmin").setDescription("Set the minimum withdrawal amount")
-      .addIntegerOption(o => o.setName("amount").setDescription("Minimum Robux amount").setRequired(true))),
+      .addIntegerOption(o => o.setName("amount").setDescription("Minimum Robux amount").setRequired(true)))
+    .addSubcommand(s => s.setName("setdepositlogchannel").setDescription("Set the public deposit log channel")
+      .addChannelOption(o => o.setName("channel").setDescription("Channel to post deposit logs in").setRequired(true)))
+    .addSubcommand(s => s.setName("setwithdrawlogchannel").setDescription("Set the public withdrawal log channel")
+      .addChannelOption(o => o.setName("channel").setDescription("Channel to post withdrawal logs in").setRequired(true))),
 
 ].map(c => c.toJSON());
 
@@ -243,6 +251,7 @@ async function handleSlash(interaction) {
   }
 
   switch (commandName) {
+    case "mylinks":     return cmdMyLinks(interaction, userId, guildId);
     case "invited":     return cmdInvited(interaction, userId, guildId, interaction.options.getUser("user"));
     case "inviter":     return cmdInviter(interaction, userId, guildId, interaction.options.getUser("user"));
     case "help":        return cmdHelp(interaction);
@@ -289,6 +298,8 @@ async function handleSlash(interaction) {
       if (sub === "viewwagerroles")       return cmdViewWagerRoles(interaction);
       if (sub === "setwithdrawchannel")   return cmdSetWithdrawChannel(interaction);
       if (sub === "setwithdrawmin")       return cmdSetWithdrawMin(interaction);
+      if (sub === "setdepositlogchannel") return cmdSetDepositLogChannel(interaction);
+      if (sub === "setwithdrawlogchannel") return cmdSetWithdrawLogChannel(interaction);
       break;
     }
   }
@@ -354,31 +365,48 @@ client.on("guildMemberAdd", async (member) => {
     const guildId = member.guild.id;
     const cachedBefore = inviteCache.get(guildId) || new Map();
 
-    // Update cache for next time
+    // Single invite fetch — shared with all handlers to avoid race conditions
     const invitesAfter = await member.guild.invites.fetch().catch(() => null);
     if (invitesAfter) inviteCache.set(guildId, invitesAfter);
 
-    // Wheel spin invite tracking
-    const data      = loadDB();
-    const guildData = data[guildId] || {};
+    console.log(`👋 [Join] ${member.user.username} (${member.user.id}) joined guild ${guildId}`);
+    console.log(`📋 [Join] invitesAfter: ${invitesAfter?.size ?? "null"} | cachedBefore: ${cachedBefore.size}`);
 
-    console.log(`🔍 [WheelInvite] Member joined: ${member.user.username} (${member.user.id})`);
-    console.log(`🔍 [WheelInvite] invitesAfter size: ${invitesAfter?.size ?? "null"}, cachedBefore size: ${cachedBefore?.size ?? 0}`);
+    // ── Figure out which invite was used ──────────────────────────────────────
+    // Find the one invite whose use count increased
+    let usedInviteCode = null;
+    if (invitesAfter) {
+      for (const [code, invite] of invitesAfter) {
+        const before = cachedBefore.get(code);
+        if (before && invite.uses > before.uses) {
+          usedInviteCode = code;
+          console.log(`🔗 [Join] Used invite code: ${code} (uses: ${before.uses} → ${invite.uses})`);
+          break;
+        }
+        // New invite not in cache before
+        if (!before && invite.uses > 0) {
+          usedInviteCode = code;
+          console.log(`🔗 [Join] Used new invite code: ${code} (uses: ${invite.uses})`);
+          break;
+        }
+      }
+    }
 
+    if (!usedInviteCode) {
+      console.log(`⚠️ [Join] Could not determine used invite code for ${member.user.username}`);
+    }
+
+    // ── Wheel spin tracking ───────────────────────────────────────────────────
     let wheelSpinGranted = false;
-    for (const [uid, udata] of Object.entries(guildData)) {
-      if (typeof udata !== "object") continue;
-      // Use stored code directly if available, otherwise parse from URL
-      const code = udata.wheelInviteCode || udata.wheelInviteUrl?.split("/").pop() || null;
-      if (!code) continue;
+    if (usedInviteCode) {
+      const data      = loadDB();
+      const guildData = data[guildId] || {};
+      for (const [uid, udata] of Object.entries(guildData)) {
+        if (typeof udata !== "object") continue;
+        const userWheelCode = udata.wheelInviteCode || udata.wheelInviteUrl?.split("/").pop() || null;
+        if (!userWheelCode || userWheelCode !== usedInviteCode) continue;
 
-      const after  = invitesAfter?.get(code);
-      const before = cachedBefore?.get(code);
-
-      console.log(`🔍 [WheelInvite] Checking user ${uid} code=${code} before.uses=${before?.uses ?? "missing"} after.uses=${after?.uses ?? "missing"}`);
-
-      if (after && before && after.uses > before.uses) {
-        console.log(`✅ [WheelInvite] Match! Granting spin to ${uid} — ${member.user.username} used their invite`);
+        console.log(`✅ [WheelInvite] Match! Granting spin to ${uid}`);
         await grantWheelSpin(guildId, uid);
         wheelSpinGranted = true;
         const inviter = await member.client.users.fetch(uid).catch(() => null);
@@ -389,29 +417,28 @@ client.on("guildMemberAdd", async (member) => {
         break;
       }
     }
-    if (!wheelSpinGranted) {
-      console.log(`ℹ️ [WheelInvite] No wheel invite match found for ${member.user.username}`);
-    }
 
-    // Affiliate, prize pool, guess code join handlers
-    // Pass invitesAfter directly so they don't re-fetch (avoids race condition)
-    const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore, invitesAfter);
-    const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore, invitesAfter);
-    const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore, invitesAfter);
+    // ── Affiliate, prize pool, guess code handlers ────────────────────────────
+    // Pass invitesAfter AND usedInviteCode so handlers don't re-fetch
+    const affMatched  = await handleAffiliateMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
+    const ppMatched   = await handlePrizepoolMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
+    const codeMatched = await handleCodeMemberJoin(member, client, cachedBefore, invitesAfter, usedInviteCode);
 
-    // If invite didn't qualify for anything, DM the new member to let them know
+    console.log(`📊 [Join] Results — wheel:${wheelSpinGranted} aff:${affMatched} pp:${ppMatched} code:${codeMatched}`);
+
+    // ── DM if invite didn't qualify for anything ──────────────────────────────
     if (!wheelSpinGranted && !affMatched && !ppMatched && !codeMatched) {
       member.user.send({ embeds: [new (require("discord.js").EmbedBuilder)()
         .setColor(0x5865F2)
         .setTitle("👋 Welcome!")
         .setDescription(
           `Welcome to the server!\n\n` +
-          `Your invite link didn't qualify for any active reward programs (affiliate, prize pool, or guess the code).\n\n` +
+          `Your invite link didn't qualify for any active reward programs.\n\n` +
           `Use \`/wheel\` for a free daily spin to get started! 🎡`
         )
         .setTimestamp()
         .setFooter({ text: "🎰 Casino Bot" })]
-      }).catch(() => {}); // DMs may be closed — silent fail
+      }).catch(() => {});
     }
 
   } catch (err) {
