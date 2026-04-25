@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Collection, MessageFlags } = require("discord.js");
-const { connectDB, loadDB } = require("./db");
+const { connectDB, loadDB, saveDB } = require("./db");
 const {
   cmdBalance, cmdLeaderboard, cmdProfile,
   cmdTip, cmdRain, cmdGive, cmdTake,
@@ -342,7 +342,51 @@ const client = new Client({
 
 const inviteCache = new Map(); // guildId -> Collection of invites
 
-client.once("clientReady", async () => {
+function getInviteUseSnapshots(db) {
+  if (!db.inviteUseSnapshots || typeof db.inviteUseSnapshots !== "object") db.inviteUseSnapshots = {};
+  return db.inviteUseSnapshots;
+}
+
+function getGuildInviteSnapshot(db, guildId) {
+  const root = getInviteUseSnapshots(db);
+  if (!root[guildId] || typeof root[guildId] !== "object") root[guildId] = {};
+  return root[guildId];
+}
+
+function updateGuildInviteSnapshotFromCollection(db, guildId, invitesCollection) {
+  const snap = getGuildInviteSnapshot(db, guildId);
+  if (!invitesCollection) return snap;
+
+  // Replace snapshot with the latest known uses for all current invites.
+  // This is safe: it doesn't delete any of your existing bot data keys,
+  // it only maintains a per-guild mapping of code -> lastKnownUses.
+  const next = {};
+  for (const [code, inv] of invitesCollection) next[code] = Number(inv?.uses || 0);
+  getInviteUseSnapshots(db)[guildId] = next;
+  return next;
+}
+
+function detectUsedInviteCode(invitesAfter, snapshotBefore) {
+  if (!invitesAfter) return null;
+
+  let bestCode = null;
+  let bestDelta = 0;
+
+  for (const [code, inv] of invitesAfter) {
+    const afterUses = Number(inv?.uses || 0);
+    const beforeUses = Number(snapshotBefore?.[code] || 0);
+    const delta = afterUses - beforeUses;
+    if (delta > bestDelta) {
+      bestDelta = delta;
+      bestCode = code;
+    }
+  }
+
+  // A join should increment exactly one invite by +1.
+  return bestDelta > 0 ? bestCode : null;
+}
+
+client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   console.log(`ℹ️ [Games] activeGames map cleared on startup — any frozen games are now auto-released (users can start fresh)`);
   // Pre-cache all invites
@@ -350,6 +394,16 @@ client.once("clientReady", async () => {
     const invites = await guild.invites.fetch().catch(() => null);
     if (invites) inviteCache.set(guild.id, invites);
     console.log(`📋 [InviteCache] Cached ${invites?.size ?? 0} invites for guild ${guild.id}`);
+
+    // Persist a baseline snapshot so invite attribution keeps working after restarts.
+    // (Fixes the "all invites credit one person" problem caused by unreliable fallback.)
+    try {
+      const db = loadDB();
+      updateGuildInviteSnapshotFromCollection(db, guild.id, invites);
+      saveDB(db);
+    } catch (err) {
+      console.error("Invite snapshot init error:", err);
+    }
   }
   await registerCommands();
 });
@@ -372,6 +426,10 @@ client.on("guildMemberAdd", async (member) => {
     const userId   = member.user.id;
     const cachedBefore = inviteCache.get(guildId) || new Map();
 
+    // Load persistent snapshot from DB (survives bot restarts)
+    const dbBefore = loadDB();
+    const snapshotBefore = getGuildInviteSnapshot(dbBefore, guildId);
+
     // Fetch current invites
     const invitesAfter = await member.guild.invites.fetch().catch(() => null);
     if (invitesAfter) inviteCache.set(guildId, invitesAfter);
@@ -379,55 +437,33 @@ client.on("guildMemberAdd", async (member) => {
     console.log(`👋 [Join] ${member.user.username} (${userId}) | before:${cachedBefore.size} after:${invitesAfter?.size ?? "null"}`);
 
     // ── Determine which invite code was used ──────────────────────────────────
-    // Strategy: find which code increased in use count vs our cache.
-    // If cachedBefore is empty (bot just restarted), fall back to DB lookup.
-    let usedInviteCode = null;
+    // We compare against a persistent snapshot stored in MongoDB, so it works
+    // correctly even if the bot restarts and the in-memory cache is empty.
+    let usedInviteCode = detectUsedInviteCode(invitesAfter, snapshotBefore);
 
-    if (invitesAfter) {
-      // Primary: compare use counts
+    // Fallback to in-memory cache diff (still useful if snapshot is missing/new)
+    if (!usedInviteCode && invitesAfter) {
       for (const [code, invite] of invitesAfter) {
         const before = cachedBefore.get(code);
         if (before && invite.uses > before.uses) {
           usedInviteCode = code;
-          console.log(`🔗 [Join] Code detected via use count: ${code} (${before.uses}→${invite.uses})`);
           break;
         }
       }
+    }
 
-      // Fallback: if cache was empty (bot restart) or no match found,
-      // check all our stored invite codes against what's in invitesAfter with uses > 0
-      if (!usedInviteCode) {
-        console.log(`⚠️ [Join] No use-count match — trying DB fallback (cache may be stale from restart)`);
-        const db = loadDB();
-        const allStoredCodes = new Set([
-          ...Object.keys(db.affiliateInvites  || {}),
-          ...Object.keys(db.prizePoolInvites  || {}),
-          ...Object.keys(db.guessCodeInvites  || {}),
-          // wheel invite codes stored per user
-          ...Object.values(db[guildId] || {})
-            .filter(u => typeof u === "object" && u.wheelInviteCode)
-            .map(u => u.wheelInviteCode),
-        ]);
+    if (usedInviteCode && invitesAfter) {
+      console.log(`🔗 [Join] Code detected: ${usedInviteCode}`);
+    }
 
-        // Among all our stored codes, find the one that exists AND has uses > 0
-        // and whose uses increased vs cache (or cache didn't have it)
-        for (const code of allStoredCodes) {
-          const invite = invitesAfter.get(code);
-          if (!invite) continue; // invite deleted or expired
-          const before = cachedBefore.get(code);
-          // If not in cache at all, check if it has uses (means it was used)
-          if (!before && invite.uses > 0) {
-            usedInviteCode = code;
-            console.log(`🔗 [Join] Code detected via DB fallback (no cache): ${code} uses=${invite.uses}`);
-            break;
-          }
-          // If in cache but same uses — might still be our code if cache is 1 join behind
-          if (before && invite.uses >= before.uses && invite.uses > 0) {
-            usedInviteCode = code;
-            console.log(`🔗 [Join] Code detected via DB fallback (cache match): ${code} uses=${invite.uses}`);
-            break;
-          }
-        }
+    // Update snapshot after processing (so next join compares correctly)
+    if (invitesAfter) {
+      try {
+        const dbAfter = loadDB();
+        updateGuildInviteSnapshotFromCollection(dbAfter, guildId, invitesAfter);
+        saveDB(dbAfter);
+      } catch (err) {
+        console.error("Invite snapshot update error:", err);
       }
     }
 
