@@ -9,6 +9,7 @@ const DEFAULT_USER = () => ({
   totalWagered: 0,
   tipsReceived: 0,
   wageredSinceTip: 0,
+  wheelEarned: 0,
   rakebackPending: 0,  // accumulated rakeback not yet claimed
   lastRakebackClaim: 0, // timestamp of last claim
   stats: {},
@@ -23,6 +24,7 @@ function getUser(guildId, userId) {
   if (u.totalWagered === undefined) u.totalWagered = 0;
   if (u.tipsReceived === undefined) u.tipsReceived = 0;
   if (u.wageredSinceTip === undefined) u.wageredSinceTip = 0;
+  if (u.wheelEarned === undefined) u.wheelEarned = 0;
   if (!u.stats) u.stats = {};
   saveDB(db);
   return u;
@@ -48,6 +50,7 @@ function setBalance(guildId, userId, amount) {
   if (u.totalWagered === undefined) u.totalWagered = 0;
   if (u.tipsReceived === undefined) u.tipsReceived = 0;
   if (u.wageredSinceTip === undefined) u.wageredSinceTip = 0;
+  if (u.wheelEarned === undefined) u.wheelEarned = 0;
   if (u.rakebackPending === undefined) u.rakebackPending = 0;
   if (u.lastRakebackClaim === undefined) u.lastRakebackClaim = 0;
   if (!u.stats) u.stats = {};
@@ -579,6 +582,10 @@ const WHEEL_ITEMS = [
   { label: "3000 Robux",         value: 3000, type: "coins",  icon: "🎰", weight: 0.1 },
 ];
 
+function hasCustomAvatar(discordUser) {
+  return !!(discordUser && discordUser.avatar);
+}
+
 function spinWheel() {
   const total = WHEEL_ITEMS.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
@@ -614,6 +621,14 @@ async function cmdWheel(interaction, userId, guildId) {
   if (!db[guildId][userId]) db[guildId][userId] = DEFAULT_USER();
   const u = db[guildId][userId];
 
+  if (!hasCustomAvatar(interaction.user)) {
+    return interaction.reply({
+      embeds: [baseEmbed("❌ No Profile Picture", COLORS.red)
+        .setDescription("Accounts without a profile picture cannot receive wheel rewards.\n\nSet a profile picture on your Discord account and try again.")],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   const now = Date.now();
   const cooldown = 24 * 60 * 60 * 1000;
   const lastSpin = u.lastWheelSpin || 0;
@@ -641,6 +656,7 @@ async function cmdWheel(interaction, userId, guildId) {
   // Award coins if it's a coin prize
   if (result.type === "coins" && result.value > 0) {
     u.balance = (u.balance || 0) + result.value;
+    u.wheelEarned = (u.wheelEarned || 0) + result.value;
   }
 
   // Award bonus item: store in activeBonus (overwrites any existing one)
