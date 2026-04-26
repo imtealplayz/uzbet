@@ -33,6 +33,11 @@ function progressBar(current, total, len = 14) {
   return "█".repeat(Math.round(pct * len)) + "░".repeat(len - Math.round(pct * len));
 }
 
+function hasCustomAvatar(discordUser) {
+  // "No profile picture" => no custom avatar set (default avatar still exists)
+  return !!(discordUser && discordUser.avatar);
+}
+
 // Which "event type" owns an invite code — used for isolation
 function getInviteOwnership(inviteCode) {
   const db = loadDB();
@@ -245,6 +250,10 @@ async function handleAffiliateMemberJoin(member, client, cachedInvitesBefore, in
     const db = loadDB();
     if ((db.leftMembers || []).includes(userId)) return false;
 
+    // Accounts without avatars / too-new accounts should not generate invite rewards
+    if (!hasCustomAvatar(member.user)) return false;
+    if (getAccountAge(userId) < 5) return false;
+
     // Use the already-determined invite code — no re-fetch needed
     const code = usedInviteCode;
     if (!code) return false;
@@ -289,7 +298,7 @@ async function cmdSetVerifyRole(interaction) {
 
 // ─── PRIZE POOL ───────────────────────────────────────────────────────────────
 
-const PP_REWARD = 20;
+const PP_REWARD = 10;
 
 function getPrizePool()     { return getGlobal("prizePool") || { active: false, total: 0, remaining: 0, panelMsgId: null, panelChannelId: null }; }
 function savePrizePool(p)   { setGlobal("prizePool", p); }
@@ -429,6 +438,10 @@ async function handlePrizepoolMemberJoin(member, client, cachedInvitesBefore, in
     const pool = getPrizePool();
     if (!pool.active || pool.remaining <= 0) return false;
 
+    // Don't allow avatar-less / too-new accounts to trigger prizepool rewards
+    if (!hasCustomAvatar(member.user)) return false;
+    if (getAccountAge(userId) < 5) return false;
+
     const code = usedInviteCode;
     if (!code) return false;
 
@@ -470,7 +483,8 @@ async function cleanupInvites(guild, eventType) {
 // ─── GUESS THE CODE ───────────────────────────────────────────────────────────
 
 const CODE_CHARS     = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const MAX_REVEAL_INV = 4;
+// Requirement: start with 1 revealed char, reveal 6 more via invites (7 total shown), last char must be guessed.
+const MAX_REVEAL_INV = 6;
 
 function generateCode() {
   let c = "";
@@ -532,7 +546,7 @@ async function cmdCreateCode(interaction, client) {
   const prize    = interaction.options.getInteger("prize");
   const fullCode = generateCode();
   const positions = Array.from({ length: 8 }, (_, i) => i).sort(() => Math.random() - 0.5);
-  const revealed  = positions.slice(0, 2).sort((a, b) => a - b);
+  const revealed  = positions.slice(0, 1).sort((a, b) => a - b);
 
   // Clear old guessCode invites from DB
   const db = loadDB();
@@ -617,6 +631,13 @@ async function cmdGuess(interaction, userId, guildId) {
 
   if (!cd?.active) return interaction.reply({ embeds: [baseEmbed("❌ No Active Code", 0xE74C3C).setDescription("No active code event right now!")], flags: MessageFlags.Ephemeral });
   if (guess.length !== 8) return interaction.reply({ embeds: [baseEmbed("❌ Invalid", 0xE74C3C).setDescription("The code must be exactly 8 characters.")], flags: MessageFlags.Ephemeral });
+  if (!hasCustomAvatar(interaction.user)) {
+    return interaction.reply({
+      embeds: [baseEmbed("❌ No Profile Picture", 0xE74C3C)
+        .setDescription("Accounts without a profile picture cannot receive event rewards.\n\nSet a profile picture and try again.")],
+      flags: MessageFlags.Ephemeral
+    });
+  }
 
   if (guess === cd.fullCode) {
     cd.active   = false;
@@ -675,8 +696,12 @@ async function handleCodeMemberJoin(member, client, cachedInvitesBefore, invites
     const ownership = getInviteOwnership(code);
     if (ownership && ownership !== "guesscode") return false;
 
+    // Don't allow avatar-less / too-new accounts to progress code reveals
+    if (!hasCustomAvatar(member.user)) return false;
+    if (getAccountAge(userId) < 5) return false;
+
     cd.inviteCount++;
-    if (cd.revealed.length < 2 + MAX_REVEAL_INV) {
+    if (cd.revealed.length < 1 + MAX_REVEAL_INV) {
       const hidden = Array.from({ length: 8 }, (_, i) => i).filter(i => !cd.revealed.includes(i));
       if (hidden.length > 0) {
         cd.revealed.push(hidden[Math.floor(Math.random() * hidden.length)]);
@@ -861,6 +886,18 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
   const member = await interaction.guild.members.fetch(userId).catch(() => null);
   if (!member) return interaction.editReply({ content: "❌ Could not find your member data." });
 
+  // Must wait 10 minutes after joining before verifying
+  const joinedAt = member.joinedTimestamp || 0;
+  const waitMs = 10 * 60 * 1000;
+  const remainingMs = waitMs - (Date.now() - joinedAt);
+  if (joinedAt && remainingMs > 0) {
+    const mins = Math.ceil(remainingMs / 60000);
+    return interaction.editReply({
+      embeds: [baseEmbed("⏳ Please Wait", 0xE74C3C)
+        .setDescription(`You must wait **10 minutes** after joining before verifying.\n\nTry again in **${mins} minute(s)**.`)]
+    });
+  }
+
   // Check if already verified
   if (member.roles.cache.has(roleId)) {
     return interaction.editReply({
@@ -881,6 +918,7 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
   // Inviters only get credit if the newly verified user is 5+ months old
   const ageMths      = getAccountAge(userId);
   const isEligible   = ageMths >= 5;
+  const hasAvatar    = hasCustomAvatar(interaction.user);
 
   ensureUser(db, guildId, userId);
   const u = db[guildId][userId];
@@ -893,7 +931,7 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
   if (u.referredBy) {
     const referrer = await client.users.fetch(u.referredBy).catch(() => null);
 
-    if (isEligible) {
+    if (isEligible && hasAvatar) {
       inviteSourceMsg = referrer
         ? `\n\n🤝 You joined via **${referrer.username}'s** affiliate link.`
         : "\n\n🤝 You joined via an affiliate link.";
@@ -913,7 +951,9 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
         }
       } catch { /* not critical */ }
     } else {
-      inviteSourceMsg = `\n\n⚠️ You joined via an affiliate link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
+      inviteSourceMsg = !hasAvatar
+        ? `\n\n⚠️ You joined via an affiliate link, but accounts without a profile picture do not give invite rewards.`
+        : `\n\n⚠️ You joined via an affiliate link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
     }
   }
 
@@ -922,7 +962,7 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
     const ppReferrerId = u.prizePoolReferredBy || null;
     const ref = ppReferrerId ? await client.users.fetch(ppReferrerId).catch(() => null) : null;
 
-    if (isEligible) {
+    if (isEligible && hasAvatar) {
       inviteSourceMsg = ref
         ? `\n\n🏆 You joined via **${ref.username}'s** prize pool link.`
         : "\n\n🏆 You joined via a prize pool link.";
@@ -965,16 +1005,33 @@ async function handleVerifyButton(interaction, userId, guildId, client) {
         } catch { /* not critical */ }
       }
     } else {
-      inviteSourceMsg = `\n\n⚠️ You joined via a prize pool link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
+      inviteSourceMsg = !hasAvatar
+        ? `\n\n⚠️ You joined via a prize pool link, but accounts without a profile picture do not give invite rewards.`
+        : `\n\n⚠️ You joined via a prize pool link, but your account is too new (${ageMths.toFixed(1)} months). The inviter won't receive credit.`;
     }
   }
 
-  // 3. Guess-the-code referral — credit regardless (just reveals a letter, no coins involved)
+  // 3. Guess-the-code referral — only allow rewards from eligible accounts
   else if (u.guessCodeReferredBy) {
     const ref = await client.users.fetch(u.guessCodeReferredBy).catch(() => null);
-    inviteSourceMsg = ref
-      ? `\n\n🔐 You joined via **${ref.username}'s** guess-the-code link.`
-      : "\n\n🔐 You joined via a guess-the-code link.";
+    if (isEligible && hasAvatar) {
+      inviteSourceMsg = ref
+        ? `\n\n🔐 You joined via **${ref.username}'s** guess-the-code link.`
+        : "\n\n🔐 You joined via a guess-the-code link.";
+    } else {
+      inviteSourceMsg = !hasAvatar
+        ? `\n\n⚠️ You joined via a guess-the-code link, but accounts without a profile picture do not give invite rewards.`
+        : `\n\n⚠️ You joined via a guess-the-code link, but your account is too new (${ageMths.toFixed(1)} months). Invite progress won't count.`;
+      // Don't generate a new guess-code link for ineligible accounts
+      saveDB(db);
+      return interaction.editReply({
+        embeds: [baseEmbed("✅ Verified!", 0x2ECC71)
+          .setDescription(
+            `You have been successfully verified and granted access to the server!${inviteSourceMsg}\n\n` +
+            `Use \`/wheel\` for a free spin or ask an admin to deposit coins to get started! 🎰`
+          )]
+      });
+    }
 
     const cd = getGlobal("guessCode");
     if (cd?.active) {
@@ -1484,18 +1541,30 @@ async function cmdWithdraw(interaction, userId, guildId, client) {
     });
   }
 
-  // Wager requirement (same as tip: must have wagered 50% of received coins)
-  const totalReceived  = (u.totalDailyClaimed || 0) + (u.tipsReceived || 0);
-  const totalWagered   = u.totalWagered || 0;
-  const required       = Math.floor(totalReceived * 0.5);
-  const remaining      = Math.max(0, required - totalWagered);
+  // Wager requirement:
+  // - Daily + tips: 50%
+  // - Prizepool earnings: 100% (cannot be withdrawn until fully wagered)
+  // - Wheel coin prizes: 70%
+  const receivedDailyTips = (u.totalDailyClaimed || 0) + (u.tipsReceived || 0);
+  const receivedPrizepool = (u.prizePoolEarned || 0);
+  const receivedWheel     = (u.wheelEarned || 0);
+  const totalWagered      = u.totalWagered || 0;
+
+  const required =
+    Math.floor(receivedDailyTips * 0.5) +
+    Math.floor(receivedPrizepool * 1.0) +
+    Math.floor(receivedWheel * 0.70);
+
+  const remaining = Math.max(0, required - totalWagered);
   if (remaining > 0) {
     return interaction.reply({
       embeds: [baseEmbed("❌ Wager Requirement", 0xE74C3C)
         .setDescription(
           `You must fulfil your wager requirement before withdrawing.\n\n` +
-          `📥 Total received (daily + tips): **${totalReceived.toLocaleString()} ${R}**\n` +
-          `🎲 Required wager (50%): **${required.toLocaleString()} ${R}**\n` +
+          `📥 Daily + tips received: **${receivedDailyTips.toLocaleString()} ${R}** (50% counts)\n` +
+          `🏆 Prizepool earned: **${receivedPrizepool.toLocaleString()} ${R}** (100% counts)\n` +
+          `🎡 Wheel earned: **${receivedWheel.toLocaleString()} ${R}** (70% counts)\n\n` +
+          `🎲 Total required wager: **${required.toLocaleString()} ${R}**\n` +
           `✅ Wagered so far: **${totalWagered.toLocaleString()} ${R}**\n` +
           `⏳ Still need: **${remaining.toLocaleString()} ${R}** more wager`
         )],
